@@ -9,7 +9,7 @@ pub mod window;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
@@ -18,21 +18,24 @@ use gtk::{gdk, gio, glib};
 use window::Win;
 
 thread_local! {
-    static WINDOWS: RefCell<Vec<Weak<Win>>> = const { RefCell::new(Vec::new()) };
+    /// The windows' state, held here for as long as each window is open:
+    /// everything else (signal handlers, timers, the page) holds it weakly.
+    static WINDOWS: RefCell<Vec<Rc<Win>>> = const { RefCell::new(Vec::new()) };
     static PROVIDER: RefCell<Option<gtk::CssProvider>> = const { RefCell::new(None) };
     static THEME_WATCH: RefCell<Option<gio::FileMonitor>> = const { RefCell::new(None) };
 }
 
 pub fn windows() -> Vec<Rc<Win>> {
-    WINDOWS.with(|w| {
-        let mut w = w.borrow_mut();
-        w.retain(|x| x.strong_count() > 0);
-        w.iter().filter_map(Weak::upgrade).collect()
-    })
+    WINDOWS.with(|w| w.borrow().clone())
 }
 
 pub(crate) fn remember(win: &Rc<Win>) {
-    WINDOWS.with(|w| w.borrow_mut().push(Rc::downgrade(win)));
+    WINDOWS.with(|w| w.borrow_mut().push(win.clone()));
+}
+
+/// The window closed: let its state go.
+pub(crate) fn forget(win: &Win) {
+    WINDOWS.with(|w| w.borrow_mut().retain(|x| !std::ptr::eq(Rc::as_ptr(x), win)));
 }
 
 pub fn startup(app: &adw::Application) {

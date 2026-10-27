@@ -78,4 +78,7 @@ grep -E '^(ok  |FAIL)' "$work/report.txt"
 grep -E '^(failed|took ms):' "$work/report.txt"
 fails=$(grep -c '^FAIL' "$work/report.txt" || true)
 echo "pictures: $work/report.shots/"
+# The basics as a person starts omamv, with nothing holding the window up.
+echo "--- smoke"
+"$repo/scripts/smoke.sh" || fails=$((fails + 1))
 [ "$fails" -eq 0 ]

@@ -24,6 +24,15 @@ use crate::scheme;
 
 static NEXT_HOST: AtomicU32 = AtomicU32::new(1);
 
+/// `OMAMV_DEBUG=1`: each step of opening a folder and a page, on stderr.
+macro_rules! trace {
+    ($($arg:tt)*) => {
+        if std::env::var_os("OMAMV_DEBUG").is_some() {
+            eprintln!("omamv: {}", format!($($arg)*));
+        }
+    };
+}
+
 /// Where a reader was in a file: the heading above the top of the window and
 /// how far below it, or a plain position.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -324,6 +333,7 @@ impl Win {
             } else if msg.contains("\"scrolled\":false") {
                 w.header.remove_css_class("om-scrolled");
             }
+            trace!("page says {msg}");
             if msg.contains("\"ready\":true") {
                 w.ready.set(true);
                 if w.gone.get() {
@@ -335,6 +345,7 @@ impl Win {
 
         let weak = self.weak();
         self.web.connect_load_changed(move |_, ev| {
+            trace!("load event {ev:?}");
             if ev == webkit6::LoadEvent::Started
                 && let Some(w) = weak.upgrade()
             {
@@ -362,6 +373,7 @@ impl Win {
             let Some(nav) = decision.downcast_ref::<NavigationPolicyDecision>() else { return false };
             let Some(action) = nav.navigation_action() else { return false };
             let uri = action.request().and_then(|r| r.uri()).map(|u| u.to_string()).unwrap_or_default();
+            trace!("navigation to {uri} ({:?})", action.navigation_type());
             // What omamv loaded itself, a reload, and a jump within the page
             // go ahead; anything else is a link, and omamv follows it.
             let base = |u: &str| u.split('#').next().unwrap_or("").to_owned();
@@ -373,6 +385,7 @@ impl Win {
             {
                 return false;
             }
+            trace!("  treated as a link");
             decision.ignore();
             w.follow(&uri);
             true
@@ -380,7 +393,8 @@ impl Win {
         // A viewer has no verbs to offer; Ctrl+C copies.
         self.web.connect_context_menu(|_, _, _| true);
         let weak = self.weak();
-        self.web.connect_web_process_terminated(move |_, _| {
+        self.web.connect_web_process_terminated(move |_, why| {
+            trace!("web process ended: {why:?}");
             if let Some(w) = weak.upgrade() {
                 w.reload_keeping_place();
             }
@@ -490,6 +504,7 @@ impl Win {
             if let Some(w) = weak.upgrade() {
                 scheme::set_root(&w.host, None);
                 w.watcher.borrow_mut().take();
+                super::forget(&w);
             }
             glib::Propagation::Proceed
         });
@@ -696,6 +711,7 @@ impl Win {
             }
             return;
         }
+        trace!("open folder {}", root.display());
         *self.root.borrow_mut() = Some(root.clone());
         scheme::set_root(&self.host, Some(root.clone()));
         crate::recent::touch(&root);
@@ -721,7 +737,11 @@ impl Win {
         let weak = self.weak();
         let watched = root.clone();
         glib::spawn_future_local(async move {
-            let Ok(Some((watcher, changes))) = rx.recv().await else { return };
+            let Ok(Some((watcher, changes))) = rx.recv().await else {
+                trace!("could not watch the folder");
+                return;
+            };
+            trace!("watching the folder");
             {
                 let Some(w) = weak.upgrade() else { return };
                 if w.root.borrow().as_deref() != Some(watched.as_path()) {
@@ -751,11 +771,14 @@ impl Win {
         let weak = self.weak();
         glib::spawn_future_local(async move {
             let Ok(scan) = rx.recv().await else { return };
+            trace!("scan done: {} files", scan.order.len());
             let Some(w) = weak.upgrade() else { return };
             if w.root.borrow().as_deref() != Some(root.as_path()) {
+                trace!("scan is for another folder; dropped");
                 return;
             }
             w.tree.show(&folder::file_name(&root), &scan, first);
+            trace!("tree shown");
             let empty = scan.order.is_empty();
             let showing = w.stack.visible_child_name();
             if matches!(showing.as_deref(), Some("reading" | "empty" | "doc")) {
@@ -766,6 +789,7 @@ impl Win {
             let pick = open
                 .filter(|f| scan.order.contains(f))
                 .or_else(|| if first || nothing_open { folder::first_file(&scan) } else { None });
+            trace!("pick {pick:?}");
             *w.scan.borrow_mut() = scan;
             if let Some(f) = pick {
                 w.open_file(&f, None, None, true);
@@ -780,6 +804,7 @@ impl Win {
     }
 
     fn empty_folder(&self) {
+        trace!("nothing to show");
         self.title.set_label(&self.root().map(|r| folder::file_name(&r)).unwrap_or_default());
         *self.current.borrow_mut() = None;
         self.window.set_title(Some("omamv"));
@@ -823,6 +848,7 @@ impl Win {
     }
 
     fn load(&self, uri: &str) {
+        trace!("load {uri}");
         *self.expect.borrow_mut() = uri.to_owned();
         self.web.load_uri(uri);
     }

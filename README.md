@@ -62,8 +62,11 @@ Hyprland session looks), and installs the desktop entry and icon.
 
 ```bash
 cargo test           # unit tests
-scripts/check.sh     # the whole app, offscreen on GTK's Broadway display
+scripts/smoke.sh     # the basics: the real binary started as a person would
+scripts/check.sh     # the whole app, offscreen on GTK's Broadway display (runs smoke.sh too)
 ```
+
+`OMAMV_DEBUG=1 omamv -w .` prints each step of opening a folder and a page.
 
 `scripts/check.sh` runs a debug build through every key path, edits and
 removes files in a copy of `tests/fixture`, switches the theme, and writes a

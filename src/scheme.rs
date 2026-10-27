@@ -87,6 +87,9 @@ pub fn parse(uri: &str) -> Option<(String, PathBuf, Option<String>)> {
 }
 
 fn not_found(req: &URISchemeRequest, why: &str) {
+    if std::env::var_os("OMAMV_DEBUG").is_some() {
+        eprintln!("omamv: {} not served: {why}", req.uri().unwrap_or_default());
+    }
     req.finish_error(&mut glib::Error::new(gio::IOErrorEnum::NotFound, why));
 }
 

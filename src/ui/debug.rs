@@ -10,6 +10,12 @@ pub fn driven() -> bool {
     cfg!(debug_assertions) && std::env::var_os("OMAMV_SELFTEST").is_some()
 }
 
+/// A debug run of its own, never handing over to (or taking over) the
+/// user's running omamv: the self-check, or `OMAMV_ALONE=1`.
+pub fn alone() -> bool {
+    driven() || (cfg!(debug_assertions) && std::env::var_os("OMAMV_ALONE").is_some())
+}
+
 #[cfg(debug_assertions)]
 pub use imp::maybe_start;
 
@@ -201,6 +207,11 @@ mod imp {
         // Broadway's screen is 1024x768; a size request is the one thing that
         // outranks it, and the pictures want the design's 1280x800.
         w.window.set_size_request(1280, 800);
+
+        // The app, not this check, must keep the window's state: with only
+        // the check holding it, every handler in a real launch finds it gone
+        // (the empty window of 2026-10-27).
+        r.check("the app keeps the window", Rc::strong_count(&w) >= 2, Rc::strong_count(&w));
 
         // ---- open and draw
         let ok = ready(&w).await;
