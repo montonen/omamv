@@ -15,7 +15,8 @@ bin="$repo/target/debug/omamv"
 mkdir -p "$work"
 run_id=$(date +%s%N)
 case_dir="$work/$run_id"
-mkdir -p "$case_dir/state" "$case_dir/empty/src"
+# Scratch settings too: the defaults, never the user's own.
+mkdir -p "$case_dir/state" "$case_dir/config" "$case_dir/empty/src"
 cp -r tests/fixture "$case_dir/fx"
 printf 'fn main() {}\n' > "$case_dir/empty/src/main.rs"
 
@@ -41,7 +42,7 @@ fail() { echo "FAIL $1"; fails=$((fails + 1)); }
 launch() {
   out="$case_dir/trace-$1.txt"; shift
   env -i HOME="$HOME" PATH="$PATH" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}" \
-    XDG_STATE_HOME="$case_dir/state" GDK_BACKEND=broadway BROADWAY_DISPLAY=":$display" \
+    XDG_STATE_HOME="$case_dir/state" XDG_CONFIG_HOME="$case_dir/config" GDK_BACKEND=broadway BROADWAY_DISPLAY=":$display" \
     DBUS_SESSION_BUS_ADDRESS=disabled: OMAMV_ALONE=1 OMAMV_DEBUG=1 \
     timeout "${WAIT:-6}" "$bin" "$@" > "$out" 2>&1
   status=$?

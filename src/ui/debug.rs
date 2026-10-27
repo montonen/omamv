@@ -240,6 +240,8 @@ mod imp {
         r.note("shot reading", shot(&w, &shots.join("1-reading.png")).await);
         let closed = (0..20).filter_map(|i| w.tree.row(i)).all(|r| !r.is_expanded());
         r.check("folders start closed (the open file is at the top)", closed, "");
+        let line = w.tree.left_out_text().unwrap_or_default();
+        r.check("the tree says what .gitignore left out", line == "1 folder left out by .gitignore", &line);
         let note = w.status.shown_note().unwrap_or_default();
         r.check("the load time is shown", note.contains("files read in") && note.contains("first page in"), &note);
         w.update_status();
@@ -558,6 +560,16 @@ mod imp {
         ready(&w).await;
         let width = js(&w, "getComputedStyle(document.querySelector('.page')).maxWidth").await;
         r.check("page width wide", width == "944px", &width);
+        let mut s = crate::settings::get();
+        s.gitignore = false;
+        crate::settings::set(s);
+        super::super::apply_settings();
+        let gone_line = wait_until(3_000, || w.tree.left_out_text().is_none()).await;
+        r.check("with .gitignore off nothing is left out", gone_line, format!("{:?}", w.tree.left_out_text()));
+        let mut s = crate::settings::get();
+        s.gitignore = true;
+        crate::settings::set(s);
+        super::super::apply_settings();
         let csp = js(&w, "document.querySelector('meta[http-equiv]').content").await;
         r.check("web pictures off leaves https out", !csp.contains("https:"), &csp);
         let saved = std::fs::read_to_string(

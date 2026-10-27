@@ -341,6 +341,9 @@ headerbar.om-header button:hover { background: alpha(@om_fg, 0.08); }
 .om-tree treeexpander { padding-right: 12px; min-height: 28px; }
 .om-tree treeexpander.om-cursor { outline: 2px solid @om_accent; outline-offset: -2px; color: @om_bright; background: alpha(@om_fg, 0.08); }
 .om-tree .om-dir { font-weight: 500; }
+button.om-tree-foot { margin: 4px 6px 8px 6px; padding: 4px 8px; border-radius: 6px; }
+.om-tree-left-out { font-size: 0.82em; font-weight: normal; color: alpha(@om_fg, 0.5); }
+button.om-tree-foot:hover .om-tree-left-out { color: alpha(@om_fg, 0.85); }
 .om-tree expander { color: alpha(@om_fg, 0.5); }
 
 /* Keys drawn as chips. */

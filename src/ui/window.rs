@@ -895,6 +895,8 @@ impl Win {
             if changed {
                 w.tree.show(&folder::file_name(&root), &scan, first);
                 trace!("tree shown");
+            } else {
+                w.tree.set_left_out(&scan);
             }
             let empty = scan.order.is_empty();
             if matches!(w.showing().as_str(), "reading" | "empty" | "doc") {

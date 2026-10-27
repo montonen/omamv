@@ -26,6 +26,9 @@ pub struct Tree {
     pub list: gtk::ListView,
     name: gtk::Label,
     count: gtk::Label,
+    /// "46 folders left out by .gitignore": a way to Settings, shown only
+    /// when the rules left something out (ADR-0004).
+    left_out: gtk::Button,
     selection: gtk::SingleSelection,
     model: RefCell<Option<gtk::TreeListModel>>,
     cursor: Rc<Cell<u32>>,
@@ -117,8 +120,20 @@ impl Tree {
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
         widget.add_css_class("om-tree");
         widget.set_margin_top(0);
+        let left_out_label = gtk::Label::builder().xalign(0.0).wrap(true).build();
+        left_out_label.add_css_class("om-tree-left-out");
+        let left_out = gtk::Button::builder()
+            .child(&left_out_label)
+            .action_name("win.settings")
+            .tooltip_text("Settings (Ctrl+,) can show them")
+            .focusable(false)
+            .visible(false)
+            .build();
+        left_out.add_css_class("flat");
+        left_out.add_css_class("om-tree-foot");
         widget.append(&head);
         widget.append(&scroller);
+        widget.append(&left_out);
         widget.set_width_request(200);
 
         let tree = Rc::new(Tree {
@@ -126,6 +141,7 @@ impl Tree {
             list,
             name,
             count,
+            left_out,
             selection,
             model: RefCell::new(None),
             cursor,
@@ -212,6 +228,7 @@ impl Tree {
             1 => "1 file".into(),
             _ => format!("{n}{more} files"),
         });
+        self.set_left_out(scan);
         self.repaint();
     }
 
@@ -314,6 +331,24 @@ impl Tree {
             i += 1;
         }
         None
+    }
+
+    /// The line under the tree: what the rules left out, if anything.
+    pub fn set_left_out(&self, scan: &Scan) {
+        match folder::left_out_line(scan.ignored, scan.hidden) {
+            Some(line) => {
+                if let Some(label) = self.left_out.child().and_downcast::<gtk::Label>() {
+                    label.set_label(&line);
+                }
+                self.left_out.set_visible(true);
+            }
+            None => self.left_out.set_visible(false),
+        }
+    }
+
+    /// The left-out line, if shown (for the checks).
+    pub fn left_out_text(&self) -> Option<String> {
+        self.left_out.is_visible().then(|| self.left_out.child().and_downcast::<gtk::Label>().map(|l| l.label().to_string())).flatten()
     }
 
     /// Where the cursor is.

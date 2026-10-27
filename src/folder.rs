@@ -31,6 +31,10 @@ pub struct Scan {
     pub truncated: bool,
     /// Every folder the walk went into, the root included: what is watched.
     pub dirs: Vec<PathBuf>,
+    /// Folders left out by the rules, counted where they were met (not the
+    /// folders inside them): by `.gitignore`, and for starting with a dot.
+    pub ignored: usize,
+    pub hidden: usize,
 }
 
 /// Is this a file omamv shows? Markdown, text (ADR-0003) and HTML pages
@@ -68,6 +72,17 @@ impl Default for Skip {
     }
 }
 
+/// The line under the tree when folders were left out, or `None`.
+pub fn left_out_line(ignored: usize, hidden: usize) -> Option<String> {
+    let folders = |n: usize| if n == 1 { "1 folder".to_string() } else { format!("{n} folders") };
+    match (ignored, hidden) {
+        (0, 0) => None,
+        (i, 0) => Some(format!("{} left out by .gitignore", folders(i))),
+        (0, h) => Some(format!("{} hidden", folders(h))),
+        (i, h) => Some(format!("{} left out by .gitignore, {h} hidden", folders(i))),
+    }
+}
+
 pub fn scan(root: &Path, skip: Skip) -> Scan {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut truncated = false;
@@ -100,10 +115,38 @@ pub fn scan(root: &Path, skip: Skip) -> Scan {
             break;
         }
     }
+    let (ignored, hidden) = if truncated { (0, 0) } else { left_out(&dirs, skip) };
     let tree = build(&files);
     let mut order = Vec::with_capacity(files.len());
     flatten(&tree, &mut order);
-    Scan { tree, order, truncated, dirs }
+    Scan { tree, order, truncated, dirs, ignored, hidden }
+}
+
+/// The folders right below the walked ones that the walk did not go into.
+/// `.git` is never anyone's reading and is not counted. A dot-folder counts
+/// as hidden while hidden folders are skipped, else as left out by .gitignore.
+fn left_out(dirs: &[PathBuf], skip: Skip) -> (usize, usize) {
+    let walked: std::collections::HashSet<&Path> = dirs.iter().map(PathBuf::as_path).collect();
+    let (mut ignored, mut hidden) = (0, 0);
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        for e in entries.flatten() {
+            if !e.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let path = e.path();
+            let name = e.file_name();
+            if name == ".git" || walked.contains(path.as_path()) {
+                continue;
+            }
+            if skip.hidden && name.to_string_lossy().starts_with('.') {
+                hidden += 1;
+            } else {
+                ignored += 1;
+            }
+        }
+    }
+    (ignored, hidden)
 }
 
 /// The tree of these files: folders appear only because a file is in them.
@@ -218,8 +261,10 @@ mod tests {
         }
         let all = scan(&dir, Skip { hidden: false, gitignored: false });
         assert_eq!(all.order.len(), 4, "hidden and ignored files too: {:?}", all.order);
+        assert_eq!((all.ignored, all.hidden), (0, 0), "nothing left out when nothing is skipped");
         let scan = scan(&dir, Skip::default());
         assert_eq!(scan.order, [p("notes/todo.txt"), p("README.md")]);
+        assert_eq!((scan.ignored, scan.hidden), (1, 1), "build/ by .gitignore, .hidden for its dot");
         assert_eq!(scan.tree.dirs.len(), 1, "src, images and the hidden and ignored folders are left out");
         assert!(scan.dirs.contains(&dir.join("src")), "watched: every folder walked");
         assert!(!scan.dirs.iter().any(|d| d.ends_with("build") || d.ends_with(".hidden")), "not what is skipped");
@@ -228,8 +273,16 @@ mod tests {
     }
 
     #[test]
+    fn the_left_out_line_reads_well() {
+        assert_eq!(left_out_line(0, 0), None);
+        assert_eq!(left_out_line(1, 0).unwrap(), "1 folder left out by .gitignore");
+        assert_eq!(left_out_line(46, 2).unwrap(), "46 folders left out by .gitignore, 2 hidden");
+        assert_eq!(left_out_line(0, 3).unwrap(), "3 folders hidden");
+    }
+
+    #[test]
     fn first_file_without_a_readme() {
-        let scan = Scan { tree: build(&[p("docs/a.md")]), order: vec![p("docs/a.md")], truncated: false, dirs: Vec::new() };
+        let scan = Scan { tree: build(&[p("docs/a.md")]), order: vec![p("docs/a.md")], truncated: false, dirs: Vec::new(), ignored: 0, hidden: 0 };
         assert_eq!(first_file(&scan), Some(p("docs/a.md")));
     }
 }
