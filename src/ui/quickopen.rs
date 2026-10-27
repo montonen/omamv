@@ -71,6 +71,14 @@ impl QuickOpen {
                 q.refresh();
             }
         });
+        // Esc: the search entry takes it for itself (stop-search), so it
+        // closes the dialog from there.
+        let weak = Rc::downgrade(&qo);
+        qo.entry.connect_stop_search(move |_| {
+            if let Some(q) = weak.upgrade() {
+                q.dialog.close();
+            }
+        });
         let weak = Rc::downgrade(&qo);
         qo.entry.connect_activate(move |_| {
             if let Some(q) = weak.upgrade() {

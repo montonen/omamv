@@ -16,7 +16,7 @@ use webkit6::URISchemeRequest;
 use crate::theme::Palette;
 
 const MERMAID: &[u8] = include_bytes!("../assets/mermaid.min.js");
-const APP_JS: &[u8] = include_bytes!("../assets/app.js");
+pub const APP_JS: &[u8] = include_bytes!("../assets/app.js");
 const PAGE_CSS: &[u8] = include_bytes!("../assets/page.css");
 
 thread_local! {
@@ -93,10 +93,26 @@ fn not_found(req: &URISchemeRequest, why: &str) {
     req.finish_error(&mut glib::Error::new(gio::IOErrorEnum::NotFound, why));
 }
 
-fn finish(req: &URISchemeRequest, bytes: Vec<u8>, mime: &str) {
+fn finish(req: &URISchemeRequest, bytes: glib::Bytes, mime: &str) {
     let len = bytes.len() as i64;
-    let stream = gio::MemoryInputStream::from_bytes(&glib::Bytes::from_owned(bytes));
+    let stream = gio::MemoryInputStream::from_bytes(&bytes);
     req.finish(&stream, len, Some(mime));
+}
+
+/// Read and answer off the main thread: a big file must not stall the window.
+fn finish_later(req: &URISchemeRequest, mime: &'static str, work: impl FnOnce() -> std::io::Result<Vec<u8>> + Send + 'static) {
+    let req = req.clone();
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = tx.send_blocking(work());
+    });
+    glib::spawn_future_local(async move {
+        match rx.recv().await {
+            Ok(Ok(bytes)) => finish(&req, glib::Bytes::from_owned(bytes), mime),
+            Ok(Err(e)) => not_found(&req, &e.to_string()),
+            Err(_) => not_found(&req, "the file could not be read"),
+        }
+    });
 }
 
 fn handle(req: &URISchemeRequest) {
@@ -106,9 +122,9 @@ fn handle(req: &URISchemeRequest) {
     };
     if host == "assets" {
         return match rel.to_str() {
-            Some("app.js") => finish(req, APP_JS.to_vec(), "text/javascript"),
-            Some("page.css") => finish(req, PAGE_CSS.to_vec(), "text/css"),
-            Some("mermaid.js") => finish(req, MERMAID.to_vec(), "text/javascript"),
+            Some("app.js") => finish(req, glib::Bytes::from_static(APP_JS), "text/javascript"),
+            Some("page.css") => finish(req, glib::Bytes::from_static(PAGE_CSS), "text/css"),
+            Some("mermaid.js") => finish(req, glib::Bytes::from_static(MERMAID), "text/javascript"),
             _ => not_found(req, "no such asset"),
         };
     }
@@ -121,22 +137,11 @@ fn handle(req: &URISchemeRequest) {
         return not_found(req, "outside the folder");
     }
     if crate::folder::is_shown(&full) {
-        let req = req.clone();
         let palette = palette();
-        let (tx, rx) = async_channel::bounded(1);
-        std::thread::spawn(move || {
-            let page = std::fs::read(&full).map(|bytes| {
-                let text = String::from_utf8_lossy(&bytes);
-                crate::render::page(&full, &text, &palette)
-            });
-            let _ = tx.send_blocking(page);
-        });
-        glib::spawn_future_local(async move {
-            match rx.recv().await {
-                Ok(Ok(html)) => finish(&req, html.into_bytes(), "text/html"),
-                Ok(Err(e)) => not_found(&req, &e.to_string()),
-                Err(_) => not_found(&req, "the page could not be drawn"),
-            }
+        finish_later(req, "text/html", move || {
+            let bytes = std::fs::read(&full)?;
+            let text = String::from_utf8_lossy(&bytes);
+            Ok(crate::render::page(&full, &text, &palette).into_bytes())
         });
         return;
     }
@@ -149,12 +154,15 @@ fn handle(req: &URISchemeRequest) {
         Some("avif") => "image/avif",
         Some("bmp") => "image/bmp",
         Some("ico") => "image/x-icon",
+        // What an HTML report brings along (ADR-0016). Never scripts.
+        Some("css") => "text/css",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("ttf") => "font/ttf",
+        Some("otf") => "font/otf",
         _ => return not_found(req, "omamv shows pictures and text only"),
     };
-    match std::fs::read(&full) {
-        Ok(bytes) => finish(req, bytes, mime),
-        Err(e) => not_found(req, &e.to_string()),
-    }
+    finish_later(req, mime, move || std::fs::read(&full));
 }
 
 #[cfg(test)]

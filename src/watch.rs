@@ -1,78 +1,106 @@
-//! Following the disk (ADR-0009): inotify on the whole folder, reduced to
-//! what matters to a reader.
+//! Following the disk (ADR-0009). Only the folders the scan walked are
+//! watched, each on its own: build output, `.git` and whatever `.gitignore`
+//! leaves out cost nothing, and a new folder is added at the next scan.
 //!
 //! Reading a file shows up as an access event; counting those would reload
 //! a page because it was read, forever. Only creations, removals, renames and
-//! writes count, and nothing under `.git`.
+//! writes count.
 
-use std::path::{Path, PathBuf};
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 use notify::{EventKind, RecursiveMode, Watcher, event::ModifyKind};
 
-/// A path under the folder changed.
+/// What happened to a path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// Its content was written.
+    Written,
+    /// It was made, removed or renamed: the tree may change.
+    Moved,
+}
+
 #[derive(Debug, Clone)]
 pub struct Change {
     pub path: PathBuf,
+    pub kind: Kind,
 }
 
-/// Watch `root`; changes arrive on the returned channel until the watcher is
-/// dropped.
-pub fn start(root: &Path) -> Option<(notify::RecommendedWatcher, async_channel::Receiver<Change>)> {
-    let (tx, rx) = async_channel::unbounded();
-    let mut watcher = notify::recommended_watcher(move |ev: notify::Result<notify::Event>| {
-        let Ok(ev) = ev else { return };
-        if !counts(&ev.kind) {
-            return;
-        }
-        for path in ev.paths {
-            if path.components().any(|c| c.as_os_str() == ".git") {
-                continue;
+pub struct Watch {
+    watcher: notify::RecommendedWatcher,
+    watched: HashSet<PathBuf>,
+}
+
+impl Watch {
+    /// A watcher with nothing watched yet; changes arrive on the channel.
+    pub fn new() -> Option<(Watch, async_channel::Receiver<Change>)> {
+        let (tx, rx) = async_channel::unbounded();
+        let watcher = notify::recommended_watcher(move |ev: notify::Result<notify::Event>| {
+            let Ok(ev) = ev else { return };
+            let Some(kind) = kind_of(&ev.kind) else { return };
+            for path in ev.paths {
+                let _ = tx.send_blocking(Change { path, kind });
             }
-            let _ = tx.send_blocking(Change { path });
+        })
+        .ok()?;
+        Some((Watch { watcher, watched: HashSet::new() }, rx))
+    }
+
+    /// Watch exactly `dirs`: add the new ones, drop the gone ones.
+    pub fn follow(&mut self, dirs: &[PathBuf]) {
+        let wanted: HashSet<&PathBuf> = dirs.iter().collect();
+        let gone: Vec<PathBuf> = self.watched.iter().filter(|d| !wanted.contains(d)).cloned().collect();
+        for d in gone {
+            let _ = self.watcher.unwatch(&d);
+            self.watched.remove(&d);
         }
-    })
-    .ok()?;
-    watcher.watch(root, RecursiveMode::Recursive).ok()?;
-    Some((watcher, rx))
+        for d in dirs {
+            if !self.watched.contains(d) && self.watcher.watch(d, RecursiveMode::NonRecursive).is_ok() {
+                self.watched.insert(d.clone());
+            }
+        }
+    }
+
+    pub fn count(&self) -> usize {
+        self.watched.len()
+    }
 }
 
-pub fn counts(kind: &EventKind) -> bool {
-    matches!(
-        kind,
-        EventKind::Create(_)
-            | EventKind::Remove(_)
-            | EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Name(_) | ModifyKind::Any)
-    )
+pub fn kind_of(kind: &EventKind) -> Option<Kind> {
+    match kind {
+        EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)) => Some(Kind::Moved),
+        EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Any) => Some(Kind::Written),
+        _ => None,
+    }
 }
 
-/// Does this change touch what the tree shows: a shown file, or a folder?
-pub fn touches_tree(path: &Path) -> bool {
-    crate::folder::is_shown(path) || path.extension().is_none()
+/// Does this change touch what the tree shows: a shown file, or a folder,
+/// made, removed or renamed?
+pub fn touches_tree(change: &Change) -> bool {
+    change.kind == Kind::Moved && (crate::folder::is_shown(&change.path) || change.path.extension().is_none() || change.path.is_dir())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notify::event::{AccessKind, CreateKind, DataChange, MetadataKind};
+    use notify::event::{AccessKind, CreateKind, DataChange, MetadataKind, RenameMode};
 
     #[test]
     fn reading_is_not_a_change() {
-        assert!(!counts(&EventKind::Access(AccessKind::Read)));
-        assert!(!counts(&EventKind::Modify(ModifyKind::Metadata(MetadataKind::Any))));
-        assert!(counts(&EventKind::Create(CreateKind::File)));
-        assert!(counts(&EventKind::Modify(ModifyKind::Data(DataChange::Content))));
+        assert_eq!(kind_of(&EventKind::Access(AccessKind::Read)), None);
+        assert_eq!(kind_of(&EventKind::Modify(ModifyKind::Metadata(MetadataKind::Any))), None);
+        assert_eq!(kind_of(&EventKind::Create(CreateKind::File)), Some(Kind::Moved));
+        assert_eq!(kind_of(&EventKind::Modify(ModifyKind::Name(RenameMode::To))), Some(Kind::Moved));
+        assert_eq!(kind_of(&EventKind::Modify(ModifyKind::Data(DataChange::Content))), Some(Kind::Written));
     }
-}
 
-#[cfg(test)]
-mod probe {
-    /// `OMAMV_PROBE=<dir> cargo test watch_probe -- --ignored --nocapture`
     #[test]
-    #[ignore]
-    fn watch_probe() {
-        let dir = std::env::var("OMAMV_PROBE").unwrap();
-        let t = std::time::Instant::now();
-        let w = super::start(std::path::Path::new(&dir));
-        eprintln!("watch started: {} in {:?}", w.is_some(), t.elapsed());
+    fn a_save_is_not_a_tree_change() {
+        let save = Change { path: PathBuf::from("/x/a.md"), kind: Kind::Written };
+        assert!(!touches_tree(&save));
+        let new = Change { path: PathBuf::from("/x/b.md"), kind: Kind::Moved };
+        assert!(touches_tree(&new));
+        let build = Change { path: PathBuf::from("/x/out.o"), kind: Kind::Moved };
+        assert!(!touches_tree(&build));
     }
 }

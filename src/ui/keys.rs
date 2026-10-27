@@ -1,5 +1,6 @@
-//! The key overview (`?`): every key on one dialog, in three groups. Nothing
-//! else in the window hints at keys (ADR-0008, ADR-0011).
+//! The key overview (`?`): every key on one dialog, in three groups
+//! (ADR-0008). The status bar shows the ones that matter where the keyboard
+//! is (ADR-0013); this shows them all.
 
 use adw::prelude::*;
 
@@ -9,6 +10,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
         "READING",
         &[
             ("j / k", "line down / up"),
+            ("↓ / ↑", "line down / up"),
             ("d / u", "half a page"),
             ("Space / Shift+Space", "a page"),
             ("g g / G", "top / end"),
@@ -26,6 +28,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("J / K", "next / previous file"),
             ("Ctrl+B", "folder tree: focus, or hide"),
             ("j k h l", "tree: move, fold, unfold"),
+            ("↓ ↑ ← →", "tree: move, fold, unfold"),
             ("Enter", "tree: open the file"),
             ("Esc", "tree: back to the page"),
             ("Ctrl+O", "open a folder"),
@@ -69,7 +72,7 @@ fn keys_cell(spec: &str) -> gtk::Box {
             slash.add_css_class("om-plus");
             b.append(&slash);
         }
-        if *alt == "j k h l" {
+        if *alt == "j k h l" || *alt == "↓ ↑ ← →" {
             for s in alt.split(' ') {
                 b.append(&super::kbd(s));
             }

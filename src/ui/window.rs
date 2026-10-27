@@ -34,6 +34,12 @@ macro_rules! trace {
     };
 }
 
+#[derive(Clone, Copy)]
+enum Timer {
+    Reload,
+    Rescan,
+}
+
 /// Where a reader was in a file: the heading above the top of the window and
 /// how far below it, or a plain position.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -92,6 +98,8 @@ pub struct Win {
     gone_label: gtk::Label,
     pub banner: adw::Banner,
     pub status: Status,
+    /// The settings this window last took (ADR-0014).
+    applied: RefCell<Option<crate::settings::Settings>>,
     pub split: adw::OverlaySplitView,
     pub tree: Rc<Tree>,
     stack: gtk::Stack,
@@ -104,7 +112,15 @@ pub struct Win {
     pub find_count: gtk::Label,
     last_find: RefCell<String>,
     last_find_at: Cell<i64>,
-    watcher: RefCell<Option<notify::RecommendedWatcher>>,
+    watcher: RefCell<Option<crate::watch::Watch>>,
+    /// The file asked for while the folder was still being read.
+    pending_open: RefCell<Option<PathBuf>>,
+    /// When the folder was asked for, and how long its scan took: the load
+    /// time shown in the status bar.
+    opened_at: Cell<Option<std::time::Instant>>,
+    scan_ms: Cell<u128>,
+    /// Walks of the folder so far (the checks count them).
+    pub scans: Cell<u32>,
     pub gone: Cell<bool>,
     pending_g: Cell<bool>,
     reload_timer: RefCell<Option<glib::SourceId>>,
@@ -116,6 +132,8 @@ pub struct Win {
     /// What the page said last (debug and the self-check read it).
     pub last_message: RefCell<String>,
     pub quick: RefCell<Option<Rc<QuickOpen>>>,
+    /// Command lines waiting for this window to close (`omamv -w`).
+    held: RefCell<Vec<gio::ApplicationCommandLine>>,
     me: RefCell<std::rc::Weak<Win>>,
 }
 
@@ -126,7 +144,12 @@ impl Win {
         // The page.
         let ucm = webkit6::UserContentManager::new();
         ucm.register_script_message_handler("omamv", None);
-        let web = WebView::builder().user_content_manager(&ucm).build();
+        // Nothing to keep between runs (cookies, caches): an ephemeral
+        // session writes nothing to disk (ADR-0002).
+        thread_local! {
+            static SESSION: webkit6::NetworkSession = webkit6::NetworkSession::new_ephemeral();
+        }
+        let web = SESSION.with(|session| WebView::builder().user_content_manager(&ucm).network_session(session).build());
         web.set_hexpand(true);
         web.set_vexpand(true);
         if let Some(settings) = WebViewExt::settings(&web) {
@@ -283,6 +306,7 @@ impl Win {
             gone_label,
             banner,
             status,
+            applied: RefCell::new(None),
             split,
             tree,
             stack,
@@ -296,6 +320,10 @@ impl Win {
             last_find: RefCell::new(String::new()),
             last_find_at: Cell::new(0),
             watcher: RefCell::new(None),
+            pending_open: RefCell::new(None),
+            opened_at: Cell::new(None),
+            scan_ms: Cell::new(0),
+            scans: Cell::new(0),
             gone: Cell::new(false),
             pending_g: Cell::new(false),
             reload_timer: RefCell::new(None),
@@ -306,15 +334,21 @@ impl Win {
             loads: Cell::new(0),
             last_message: RefCell::new(String::new()),
             quick: RefCell::new(None),
+            held: RefCell::new(Vec::new()),
             me: RefCell::new(std::rc::Weak::new()),
         });
         *win.me.borrow_mut() = Rc::downgrade(&win);
         *win_holder.borrow_mut() = Rc::downgrade(&win);
         super::remember(&win);
-        win.wire(&ucm, &menu_button);
+        win.wire(&ucm);
         win.apply_settings();
         win.show_start();
         win
+    }
+
+    /// Keep `cmd` until this window closes: `omamv -w` waits for that.
+    pub fn hold(&self, cmd: &gio::ApplicationCommandLine) {
+        self.held.borrow_mut().push(cmd.clone());
     }
 
     /// Which screen the window shows: start, reading, empty or doc.
@@ -330,7 +364,7 @@ impl Win {
         self.me.borrow().clone()
     }
 
-    fn wire(&self, ucm: &webkit6::UserContentManager, _menu: &gtk::MenuButton) {
+    fn wire(&self, ucm: &webkit6::UserContentManager) {
         // Messages from the page.
         let weak = self.weak();
         ucm.connect_script_message_received(Some("omamv"), move |_, value| {
@@ -346,6 +380,14 @@ impl Win {
                 w.ready.set(true);
                 if w.gone.get() {
                     w.js("omamv.gone(true)");
+                }
+                // How fast: the folder's scan, and the first page drawn.
+                if let Some(t) = w.opened_at.take() {
+                    let files = w.scan.borrow().order.len();
+                    let total = t.elapsed().as_millis();
+                    let note = format!("{files} files read in {} ms · first page in {total} ms", w.scan_ms.get());
+                    trace!("{note}");
+                    w.status.note(&note);
                 }
             }
             *w.last_message.borrow_mut() = msg;
@@ -363,6 +405,18 @@ impl Win {
                 && let Some(w) = weak.upgrade()
             {
                 w.loads.set(w.loads.get() + 1);
+                // An HTML page from the folder has no omamv script of its own
+                // (its policy blocks scripts); the helper comes in through
+                // WebKit, which the policy does not stop (ADR-0016).
+                let html = w.current.borrow().as_deref().is_some_and(folder::is_html);
+                if html {
+                    let helper = String::from_utf8_lossy(scheme::APP_JS).into_owned();
+                    w.web.evaluate_javascript(&helper, None, None, gio::Cancellable::NONE, |r| {
+                        if let Err(e) = r {
+                            eprintln!("omamv: the page helper did not start: {e}");
+                        }
+                    });
+                }
             }
         });
 
@@ -539,6 +593,7 @@ impl Win {
             if let Some(w) = weak.upgrade() {
                 scheme::set_root(&w.host, None);
                 w.watcher.borrow_mut().take();
+                w.held.borrow_mut().clear();
                 super::forget(&w);
             }
             glib::Propagation::Proceed
@@ -572,6 +627,10 @@ impl Win {
             }
             (true, _, "o") if !shift => {
                 self.choose_folder();
+                return true;
+            }
+            (true, _, "comma") => {
+                self.show_settings();
                 return true;
             }
             (true, _, "O") | (true, _, "o") => {
@@ -609,10 +668,6 @@ impl Win {
         match (ctrl, alt, name.as_str()) {
             (true, _, "p") => {
                 self.quick_open();
-                return true;
-            }
-            (true, _, "comma") => {
-                self.show_settings();
                 return true;
             }
             (true, _, "f") => {
@@ -661,8 +716,8 @@ impl Win {
 
         let g = self.pending_g.replace(false);
         match name.as_str() {
-            "j" => self.js("omamv.scroll('down')"),
-            "k" => self.js("omamv.scroll('up')"),
+            "j" | "Down" => self.js("omamv.scroll('down')"),
+            "k" | "Up" => self.js("omamv.scroll('up')"),
             "d" => self.js("omamv.scroll('half-down')"),
             "u" => self.js("omamv.scroll('half-up')"),
             "G" => self.js("omamv.scroll('bottom')"),
@@ -743,10 +798,24 @@ impl Win {
         let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         let same = self.root.borrow().as_deref() == Some(root.as_path());
         if same {
-            self.stack.set_visible_child_name("doc");
-            self.set_chrome(true);
-            if let Some(f) = file {
-                self.open_file(&f, None, None, true);
+            match self.showing().as_str() {
+                // Still reading: the file waits for the scan.
+                "reading" => {
+                    if file.is_some() {
+                        *self.pending_open.borrow_mut() = file;
+                    }
+                }
+                _ => {
+                    let empty = self.scan.borrow().order.is_empty();
+                    self.stack.set_visible_child_name(if empty { "empty" } else { "doc" });
+                    self.set_chrome(!empty);
+                    if let Some(f) = file {
+                        self.open_file(&f, None, None, true);
+                    }
+                    if !empty {
+                        self.web.grab_focus();
+                    }
+                }
             }
             return;
         }
@@ -757,77 +826,84 @@ impl Win {
         self.history.borrow_mut().clear();
         self.hist_at.set(0);
         *self.current.borrow_mut() = None;
-        self.gone.set(false);
-        self.banner.set_revealed(false);
+        *self.pending_open.borrow_mut() = file;
+        self.opened_at.set(Some(std::time::Instant::now()));
+        for slot in [&self.reload_timer, &self.rescan_timer] {
+            if let Some(id) = slot.borrow_mut().take() {
+                id.remove();
+            }
+        }
+        self.set_gone(false);
+        self.last_find_at.set(0);
         self.stack.set_visible_child_name("reading");
         self.set_chrome(false);
         self.title.set_label(&folder::file_name(&root));
         self.subtitle.set_label(&folder::tilde(&root));
         self.web.load_html(&crate::render::wrap("", "", &scheme::palette()), None);
 
-        // Follow the disk. Watching every folder below a big one takes a
-        // second or more, so it is set up off the main thread.
+        // Follow the disk: the folders to watch come with the scan.
         *self.watcher.borrow_mut() = None;
-        let (tx, rx) = async_channel::bounded(1);
-        let watch_root = root.clone();
-        std::thread::spawn(move || {
-            let _ = tx.send_blocking(crate::watch::start(&watch_root));
-        });
-        let weak = self.weak();
-        let watched = root.clone();
-        glib::spawn_future_local(async move {
-            let Ok(Some((watcher, changes))) = rx.recv().await else {
-                trace!("could not watch the folder");
-                return;
-            };
-            trace!("watching the folder");
-            {
-                let Some(w) = weak.upgrade() else { return };
-                if w.root.borrow().as_deref() != Some(watched.as_path()) {
-                    return;
+        if let Some((watch, changes)) = crate::watch::Watch::new() {
+            *self.watcher.borrow_mut() = Some(watch);
+            let weak = self.weak();
+            let watched = root.clone();
+            glib::spawn_future_local(async move {
+                while let Ok(change) = changes.recv().await {
+                    let Some(w) = weak.upgrade() else { break };
+                    if w.root.borrow().as_deref() != Some(watched.as_path()) {
+                        break;
+                    }
+                    w.on_change(&change);
                 }
-                *w.watcher.borrow_mut() = Some(watcher);
-            }
-            while let Ok(change) = changes.recv().await {
-                let Some(w) = weak.upgrade() else { break };
-                if w.root.borrow().as_deref() != Some(watched.as_path()) {
-                    break;
-                }
-                w.on_change(&change.path);
-            }
-        });
-        self.rescan(true, file);
+            });
+        }
+        self.rescan(true);
     }
 
     /// Walk the folder again, off the main thread.
-    fn rescan(&self, first: bool, open: Option<PathBuf>) {
+    /// Walk the folder again, off the main thread. The tree is rebuilt only
+    /// when what it shows changed.
+    fn rescan(&self, first: bool) {
         let Some(root) = self.root() else { return };
+        self.scans.set(self.scans.get() + 1);
         let (tx, rx) = async_channel::bounded(1);
         let walk_root = root.clone();
         std::thread::spawn(move || {
             let s = crate::settings::get();
             let skip = folder::Skip { hidden: !s.hidden, gitignored: s.gitignore };
-            let _ = tx.send_blocking(folder::scan(&walk_root, skip));
+            let t = std::time::Instant::now();
+            let scan = folder::scan(&walk_root, skip);
+            let _ = tx.send_blocking((scan, t.elapsed().as_millis()));
         });
         let weak = self.weak();
         glib::spawn_future_local(async move {
-            let Ok(scan) = rx.recv().await else { return };
-            trace!("scan done: {} files", scan.order.len());
+            let Ok((scan, ms)) = rx.recv().await else { return };
+            trace!("scan done: {} files, {} folders, {ms} ms", scan.order.len(), scan.dirs.len());
             let Some(w) = weak.upgrade() else { return };
             if w.root.borrow().as_deref() != Some(root.as_path()) {
                 trace!("scan is for another folder; dropped");
                 return;
             }
-            w.tree.show(&folder::file_name(&root), &scan, first);
-            trace!("tree shown");
+            if let Some(watch) = w.watcher.borrow_mut().as_mut() {
+                watch.follow(&scan.dirs);
+                trace!("watching {} folders", watch.count());
+            }
+            if first {
+                w.scan_ms.set(ms);
+            }
+            let changed = first || w.scan.borrow().tree != scan.tree;
+            if changed {
+                w.tree.show(&folder::file_name(&root), &scan, first);
+                trace!("tree shown");
+            }
             let empty = scan.order.is_empty();
-            let showing = w.stack.visible_child_name();
-            if matches!(showing.as_deref(), Some("reading" | "empty" | "doc")) {
+            if matches!(w.showing().as_str(), "reading" | "empty" | "doc") {
                 w.stack.set_visible_child_name(if empty { "empty" } else { "doc" });
                 w.set_chrome(!empty);
             }
             let nothing_open = w.current.borrow().is_none();
-            let pick = open
+            let asked = w.pending_open.borrow_mut().take();
+            let pick = asked
                 .filter(|f| scan.order.contains(f))
                 .or_else(|| if first || nothing_open { folder::first_file(&scan) } else { None });
             trace!("pick {pick:?}");
@@ -837,15 +913,27 @@ impl Win {
                 w.web.grab_focus();
             } else if empty {
                 w.empty_folder();
-            } else {
+            } else if changed {
                 let cur = w.current.borrow().clone();
                 w.tree.mark(cur.as_deref());
             }
+            w.update_status();
         });
     }
 
     fn empty_folder(&self) {
         trace!("nothing to show");
+        self.set_gone(false);
+        let s = crate::settings::get();
+        let skipped = match (s.hidden, s.gitignore) {
+            (false, true) => " Hidden folders and anything .gitignore leaves out are skipped (Ctrl+, changes that).",
+            (false, false) => " Hidden folders are skipped (Ctrl+, changes that).",
+            (true, true) => " Anything .gitignore leaves out is skipped (Ctrl+, changes that).",
+            (true, false) => "",
+        };
+        self.empty_page.set_description(Some(&format!(
+            "omamv shows .md and .txt files, in this folder and the folders below it.{skipped}"
+        )));
         self.title.set_label(&self.root().map(|r| folder::file_name(&r)).unwrap_or_default());
         *self.current.borrow_mut() = None;
         self.window.set_title(Some("omamv"));
@@ -868,7 +956,9 @@ impl Win {
             self.hist_at.set(h.len() - 1);
         }
         *self.current.borrow_mut() = Some(file.to_path_buf());
-        self.set_gone(false);
+        // Back to a file removed since: it is shown as gone, not as an error.
+        self.set_gone(!root.join(file).is_file());
+        self.last_find_at.set(0);
         self.close_find_quietly();
         let mut uri = scheme::uri(&self.host, file);
         if let Some(p) = place {
@@ -891,18 +981,26 @@ impl Win {
 
     fn load(&self, uri: &str) {
         trace!("load {uri}");
+        self.ready.set(false);
         *self.expect.borrow_mut() = uri.to_owned();
         self.web.load_uri(uri);
     }
 
     /// Note where the reader is in the current file, for Alt+← later.
     fn remember_place(&self) {
+        // A page still loading would answer for the one before it.
+        if !self.ready.get() {
+            return;
+        }
         let at = self.hist_at.get();
+        let Some(file) = self.current.borrow().clone() else { return };
         let weak = self.weak();
         self.web.evaluate_javascript("omamv.place()", None, None, gio::Cancellable::NONE, move |r| {
             let (Some(w), Ok(v)) = (weak.upgrade(), r) else { return };
             let place = Place::parse(&v.to_str());
-            if let Some(visit) = w.history.borrow_mut().get_mut(at) {
+            if let Some(visit) = w.history.borrow_mut().get_mut(at)
+                && visit.file == file
+            {
                 visit.place = place;
             }
         });
@@ -954,12 +1052,13 @@ impl Win {
                 }
                 return;
             }
+            // A file omamv shows opens here. Anything else is left alone: a
+            // document must never get the desktop to open (and so perhaps
+            // run) another file with one click, ADR-0010.
             if folder::is_shown(&rel) && full.is_file() {
                 self.open_file(&rel, fragment.as_deref(), None, true);
-            } else if full.exists() {
-                // Not something omamv shows: the desktop's own app for it.
-                let launcher = gtk::FileLauncher::new(Some(&gio::File::for_path(&full)));
-                launcher.launch(Some(&self.window), gio::Cancellable::NONE, |_| {});
+            } else {
+                self.say("omamv shows .md and .txt files only");
             }
             return;
         }
@@ -969,6 +1068,10 @@ impl Win {
     }
 
     pub fn reload_keeping_place(&self) {
+        // A removed file's last version stays as it is: there is nothing to load.
+        if self.gone.get() {
+            return;
+        }
         let Some(file) = self.current.borrow().clone() else { return };
         let weak = self.weak();
         self.web.evaluate_javascript("omamv.place()", None, None, gio::Cancellable::NONE, move |r| {
@@ -992,30 +1095,37 @@ impl Win {
 
     // --------------------------------------------------------- the disk
 
-    fn on_change(&self, path: &Path) {
+    fn on_change(&self, change: &crate::watch::Change) {
         let Some(root) = self.root() else { return };
         let current = self.current.borrow().as_ref().map(|c| root.join(c));
-        if current.as_deref() == Some(path) {
-            self.debounce(&self.reload_timer, 120, |w| w.current_changed());
+        if current.as_deref() == Some(change.path.as_path()) {
+            self.debounce(Timer::Reload);
         }
-        if crate::watch::touches_tree(path) {
-            self.debounce(&self.rescan_timer, 300, |w| w.rescan(false, None));
+        if crate::watch::touches_tree(change) {
+            self.debounce(Timer::Rescan);
         }
     }
 
-    fn debounce(&self, slot: &RefCell<Option<glib::SourceId>>, ms: u64, f: fn(&Win)) {
+    fn debounce(&self, which: Timer) {
+        let (slot, ms) = match which {
+            Timer::Reload => (&self.reload_timer, 120),
+            Timer::Rescan => (&self.rescan_timer, 300),
+        };
         if let Some(id) = slot.borrow_mut().take() {
             id.remove();
         }
         let weak = self.weak();
         let id = glib::timeout_add_local_once(Duration::from_millis(ms), move || {
-            if let Some(w) = weak.upgrade() {
-                if ms == 120 {
+            let Some(w) = weak.upgrade() else { return };
+            match which {
+                Timer::Reload => {
                     w.reload_timer.borrow_mut().take();
-                } else {
-                    w.rescan_timer.borrow_mut().take();
+                    w.current_changed();
                 }
-                f(&w);
+                Timer::Rescan => {
+                    w.rescan_timer.borrow_mut().take();
+                    w.rescan(false);
+                }
             }
         });
         *slot.borrow_mut() = Some(id);
@@ -1054,19 +1164,23 @@ impl Win {
 
     fn set_gone(&self, gone: bool) {
         let was = self.gone.replace(gone);
+        self.gone_label.set_label("gone");
         self.gone_label.set_visible(gone);
         if gone {
             self.changed.set_visible(false);
             let name = self.current.borrow().as_deref().map(folder::file_name).unwrap_or_default();
             self.banner.set_title(&format!("{name} was removed. The last version stays on screen."));
-            self.banner.set_revealed(true);
+            // Over the page only; set_chrome shows it again on the way back.
+            self.banner.set_revealed(self.showing() == "doc");
             self.js("omamv.gone(true)");
             if !was {
                 // The tree has dropped it; the keyboard goes there to pick another.
                 let weak = self.weak();
                 glib::timeout_add_local_once(Duration::from_millis(400), move || {
+                    // Only from the page: never out of find, quick open or a dialog.
                     if let Some(w) = weak.upgrade()
                         && w.gone.get()
+                        && w.keyboard_mode() == Mode::Page
                     {
                         w.split.set_show_sidebar(true);
                         w.tree.focus();
@@ -1097,6 +1211,15 @@ impl Win {
         });
         // Noted first: the status bar asks which dialog it is as it appears.
         *self.quick.borrow_mut() = Some(qo.clone());
+        let weak = self.weak();
+        qo.dialog.connect_closed(move |_| {
+            if let Some(w) = weak.upgrade() {
+                // Not while the self-check still reads it; the next Ctrl+P replaces it anyway.
+                if !super::debug::driven() {
+                    w.quick.borrow_mut().take();
+                }
+            }
+        });
         qo.present(&self.window);
     }
 
@@ -1134,7 +1257,7 @@ impl Win {
         // Find again, then step from where the search starts to the match
         // after the last one.
         self.find_js(&format!("(() => {{ const r = JSON.parse(omamv.find({})); if (!r.count) return JSON.stringify(r); \
-            const want = ((({at} - 1 + ({dir})) % r.count) + r.count) % r.count; \
+            const want = {at} === 0 ? ({dir} > 0 ? 0 : r.count - 1) : ((({at} - 1 + ({dir})) % r.count) + r.count) % r.count; \
             let now = JSON.parse(omamv.step(0)).at - 1; return omamv.step(want - now) }})()", js_string(&q)));
         let weak = self.weak();
         glib::timeout_add_local_once(Duration::from_millis(1200), move || {
@@ -1196,6 +1319,7 @@ impl Win {
     /// Take the settings as they are now (ADR-0014).
     pub fn apply_settings(&self) {
         let s = crate::settings::get();
+        let was = self.applied.replace(Some(s.clone()));
         self.split.set_sidebar_position(if s.tree_left { gtk::PackType::Start } else { gtk::PackType::End });
         if s.tree_left {
             self.tree.widget.add_css_class("om-tree-left");
@@ -1203,10 +1327,24 @@ impl Win {
             self.tree.widget.remove_css_class("om-tree-left");
         }
         self.tree_button.set_icon_name(if s.tree_left { "sidebar-show-symbolic" } else { "sidebar-show-right-symbolic" });
-        self.status.widget.set_visible(s.key_hints);
-        self.set_zoom(s.zoom());
-        if self.root.borrow().is_some() {
-            self.rescan(false, None);
+        self.status.show_hints(s.key_hints);
+        // Only what changed: a new text size resets a passing Ctrl+plus, a
+        // new skip rule walks the folder again, a new page width or picture
+        // rule draws the page again.
+        let differs = |f: fn(&crate::settings::Settings) -> String| was.as_ref().is_none_or(|w| f(w) != f(&s));
+        if differs(|x| x.text_size.to_string()) {
+            self.set_zoom(s.zoom());
+        }
+        if self.root.borrow().is_none() || was.is_none() {
+            return;
+        }
+        if differs(|x| format!("{}{}", x.hidden, x.gitignore)) {
+            self.rescan(false);
+            if self.showing() == "empty" {
+                self.empty_folder();
+            }
+        }
+        if differs(|x| format!("{:?}{}", x.width, x.web_pictures)) {
             self.reload_keeping_place();
         }
     }

@@ -29,13 +29,16 @@ pub struct Scan {
     pub order: Vec<PathBuf>,
     /// The walk stopped at `MAX_FILES`.
     pub truncated: bool,
+    /// Every folder the walk went into, the root included: what is watched.
+    pub dirs: Vec<PathBuf>,
 }
 
-/// Is this a file omamv shows?
+/// Is this a file omamv shows? Markdown, text (ADR-0003) and HTML pages
+/// (ADR-0016).
 pub fn is_shown(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("txt"))
+        .is_some_and(|e| ["md", "txt", "html", "htm"].iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
 /// Is this file Markdown (rendered), rather than text (shown as it is)?
@@ -43,6 +46,13 @@ pub fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+}
+
+/// Is this an HTML page (shown as its author made it, without scripts)?
+pub fn is_html(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"))
 }
 
 /// What a walk leaves out (ADR-0014).
@@ -73,7 +83,12 @@ pub fn scan(root: &Path, skip: Skip) -> Scan {
         .follow_links(false)
         .require_git(false)
         .build();
+    let mut dirs: Vec<PathBuf> = Vec::new();
     for entry in walk.flatten() {
+        if entry.file_type().is_some_and(|t| t.is_dir()) {
+            dirs.push(entry.path().to_path_buf());
+            continue;
+        }
         if !entry.file_type().is_some_and(|t| t.is_file()) || !is_shown(entry.path()) {
             continue;
         }
@@ -88,7 +103,7 @@ pub fn scan(root: &Path, skip: Skip) -> Scan {
     let tree = build(&files);
     let mut order = Vec::with_capacity(files.len());
     flatten(&tree, &mut order);
-    Scan { tree, order, truncated }
+    Scan { tree, order, truncated, dirs }
 }
 
 /// The tree of these files: folders appear only because a file is in them.
@@ -206,13 +221,15 @@ mod tests {
         let scan = scan(&dir, Skip::default());
         assert_eq!(scan.order, [p("notes/todo.txt"), p("README.md")]);
         assert_eq!(scan.tree.dirs.len(), 1, "src, images and the hidden and ignored folders are left out");
+        assert!(scan.dirs.contains(&dir.join("src")), "watched: every folder walked");
+        assert!(!scan.dirs.iter().any(|d| d.ends_with("build") || d.ends_with(".hidden")), "not what is skipped");
         assert_eq!(first_file(&scan), Some(p("README.md")));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn first_file_without_a_readme() {
-        let scan = Scan { tree: build(&[p("docs/a.md")]), order: vec![p("docs/a.md")], truncated: false };
+        let scan = Scan { tree: build(&[p("docs/a.md")]), order: vec![p("docs/a.md")], truncated: false, dirs: Vec::new() };
         assert_eq!(first_file(&scan), Some(p("docs/a.md")));
     }
 }
@@ -226,6 +243,6 @@ mod probe {
         let dir = std::env::var("OMAMV_PROBE").unwrap();
         let t = std::time::Instant::now();
         let s = super::scan(std::path::Path::new(&dir), super::Skip::default());
-        eprintln!("{} files in {:?}, truncated {}: {:?}", s.order.len(), t.elapsed(), s.truncated, &s.order[..s.order.len().min(8)]);
+        eprintln!("{} files, {} folders in {:?}, truncated {}", s.order.len(), s.dirs.len(), t.elapsed(), s.truncated);
     }
 }

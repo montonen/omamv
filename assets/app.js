@@ -3,6 +3,7 @@
 // The window calls `omamv.*`; the page tells the window things through the
 // "omamv" message handler.
 "use strict";
+if (!window.__omamvLoaded) {
 
 const css = getComputedStyle(document.documentElement);
 const v = (name) => css.getPropertyValue(name).trim();
@@ -166,7 +167,7 @@ function find(query) {
   clearFind();
   const q = query.toLowerCase();
   if (!q) return JSON.stringify({ count: 0, at: 0 });
-  const root = document.querySelector(".page");
+  const root = document.querySelector(".page") || document.body;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (n) => (n.parentElement && n.parentElement.closest("svg, script, style, pre.mermaid") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
@@ -226,6 +227,7 @@ function gone(on) {
 }
 
 window.omamv = { place, scroll: scrollCmd, find, step, endFind, gone };
+window.__omamvLoaded = true;
 
 (async () => {
   const t0 = performance.now();
@@ -244,3 +246,4 @@ window.omamv = { place, scroll: scrollCmd, find, step, endFind, gone };
   document.documentElement.dataset.ready = "1";
   tell({ ready: true, ms: Math.round(performance.now() - t0), scrolled: window.scrollY > 0 });
 })();
+}

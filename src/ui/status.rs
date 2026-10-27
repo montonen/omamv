@@ -4,6 +4,7 @@
 use std::cell::Cell;
 
 use adw::prelude::*;
+use gtk::glib;
 
 /// Where the keyboard is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,7 +25,7 @@ impl Mode {
     pub fn hints(self) -> &'static [(&'static str, &'static str)] {
         match self {
             Mode::Page => &[
-                ("j k", "scroll"),
+                ("j k ↓ ↑", "scroll"),
                 ("d u", "half page"),
                 ("Ctrl+P", "open a file"),
                 ("] [", "next / previous file"),
@@ -33,8 +34,8 @@ impl Mode {
                 ("?", "all keys"),
             ],
             Mode::Tree => &[
-                ("j k", "move"),
-                ("h l", "fold / unfold"),
+                ("j k ↓ ↑", "move"),
+                ("h l ← →", "fold / unfold"),
                 ("Enter", "open"),
                 ("Esc", "back to the page"),
                 ("Ctrl+B", "hide the tree"),
@@ -55,6 +56,10 @@ pub struct Status {
     hints: gtk::Box,
     place: gtk::Label,
     mode: Cell<Option<Mode>>,
+    /// A passing note on the right (the load time), in place of the file's
+    /// place, until it times out.
+    note: std::rc::Rc<std::cell::RefCell<Option<String>>>,
+    last_place: std::rc::Rc<std::cell::RefCell<String>>,
 }
 
 impl Status {
@@ -67,7 +72,7 @@ impl Status {
         widget.add_css_class("om-status");
         widget.append(&hints);
         widget.append(&place);
-        Status { widget, hints, place, mode: Cell::new(None) }
+        Status { widget, hints, place, mode: Cell::new(None), note: Default::default(), last_place: Default::default() }
     }
 
     pub fn mode(&self) -> Option<Mode> {
@@ -76,7 +81,13 @@ impl Status {
 
     /// Show the keys for `mode`, and `place` (like "3 / 7") on the right.
     pub fn set(&self, mode: Mode, place: Option<(usize, usize)>) {
-        self.place.set_label(&place.map(|(at, of)| format!("{at} / {of}")).unwrap_or_default());
+        let place = place.map(|(at, of)| format!("{at} / {of}")).unwrap_or_default();
+        *self.last_place.borrow_mut() = place.clone();
+        match self.note.borrow().as_ref() {
+            Some(note) if place.is_empty() => self.place.set_label(note),
+            Some(note) => self.place.set_label(&format!("{note}   ·   {place}")),
+            None => self.place.set_label(&place),
+        }
         if self.mode.replace(Some(mode)) == Some(mode) {
             return;
         }
@@ -99,6 +110,35 @@ impl Status {
             hint.append(&label);
             self.hints.append(&hint);
         }
+    }
+
+    /// Show `text` on the right for a few seconds.
+    pub fn note(&self, text: &str) {
+        *self.note.borrow_mut() = Some(text.to_owned());
+        let place = self.last_place.borrow().clone();
+        self.place.set_label(&if place.is_empty() { text.to_owned() } else { format!("{text}   ·   {place}") });
+        let (note, label, last) = (self.note.clone(), self.place.clone(), self.last_place.clone());
+        let mine = text.to_owned();
+        glib::timeout_add_local_once(std::time::Duration::from_secs(8), move || {
+            if note.borrow().as_deref() == Some(mine.as_str()) {
+                note.borrow_mut().take();
+                label.set_label(&last.borrow());
+            }
+        });
+    }
+
+    /// The note on the right, if one is showing (for the checks).
+    pub fn shown_note(&self) -> Option<String> {
+        self.note.borrow().clone()
+    }
+
+    /// Key hints on or off (ADR-0014); the bar stays for the place and notes.
+    pub fn show_hints(&self, on: bool) {
+        self.hints.set_visible(on);
+    }
+
+    pub fn hints_shown(&self) -> bool {
+        self.hints.is_visible()
     }
 
     /// Every hint as text, for the checks.

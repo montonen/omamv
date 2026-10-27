@@ -44,6 +44,8 @@ echo tokyo-night > "$theme/theme.name"
 display=""
 for n in $(seq 40 60); do
   sock="${XDG_RUNTIME_DIR:-/tmp}/broadway$((n + 1)).socket"
+  # A server that is gone leaves its socket behind: clear it, then use the slot.
+  if [ -e "$sock" ] && ! pgrep -f "gtk4-broadwayd :$n\$" >/dev/null; then rm -f -- "$sock"; fi
   [ -e "$sock" ] && continue
   display=$n
   break

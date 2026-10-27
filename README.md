@@ -21,15 +21,21 @@ already open is brought forward.
   footnotes), highlighted code, Mermaid and PlantUML diagrams in the theme's
   colours. A diagram that cannot be drawn shows as code, with the reason.
 - `.txt` files as they are.
-- A folder tree on the right with only the folders that hold such files.
-  Hidden folders and anything `.gitignore` leaves out are skipped.
+- `.html` pages, such as reports from scans and jobs, as their author made them:
+  their own styles and pictures, but their scripts do not run and nothing
+  loads from the network.
+- A folder tree, right or left, with only the folders that hold such files,
+  closed but for the way to the open file. Hidden folders and anything
+  `.gitignore` leaves out are skipped (both are settings).
 
 When the open file changes on disk the page is drawn again at the same
 heading; files added or removed appear in the tree by themselves. A removed
 file stays on screen, faded, until you pick another.
 
-Scripts in a document never run, and nothing is fetched to draw a page except
-pictures the document itself links from the web.
+Scripts in a document never run. Nothing is fetched to draw a page except
+pictures a document links from the web, and that can be turned off. A link to
+a file omamv does not show opens nothing. PlantUML runs in its sandbox, so a
+diagram cannot read other files.
 
 ## Keys
 
@@ -37,13 +43,17 @@ Press `?` in the window for all of them.
 
 | Keys | |
 | --- | --- |
-| `j` `k` · `d` `u` · `Space` · `g g` `G` | scroll |
+| `j` `k` or `↓` `↑` · `d` `u` · `Space` · `g g` `G` | scroll |
 | `Ctrl+P` | open a file by name |
 | `]` `[` or `J` `K` | next / previous file |
-| `Ctrl+B` | folder tree: focus, or hide (`j k h l Enter Esc` inside) |
+| `Ctrl+B` | folder tree: focus, or hide (`j k h l`, arrows, `Enter`, `Esc` inside) |
 | `Ctrl+F` or `/` · `n` `N` | find |
 | `Alt+←` `Alt+→` | back / forward |
 | `Ctrl+O` · `Ctrl+Shift+O` | open a folder · recent folders |
+| `Ctrl+,` | settings |
+
+The status bar shows the keys that matter where the keyboard is, and, when a
+folder opens, how fast it was read and drawn.
 
 ## Install
 

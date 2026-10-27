@@ -37,17 +37,25 @@ Options:
 omamv only reads. Press ? in the window for the keys.
 ";
 
+/// Set when `-w` was given, for the instance that serves the command line.
+const WAIT: &str = "OMAMV_WAIT";
+
 /// Set on the copy of omamv that a terminal launch hands over to.
 const DETACHED: &str = "OMAMV_DETACHED";
 
 fn main() -> glib::ExitCode {
     let mut wait = false;
     let mut paths: Vec<String> = Vec::new();
+    let mut options_done = false;
     for arg in std::env::args_os().skip(1) {
         let Some(arg) = arg.to_str().map(str::to_owned) else {
             eprintln!("omamv: a path that is not UTF-8 cannot be shown");
             return glib::ExitCode::FAILURE;
         };
+        if options_done {
+            paths.push(arg);
+            continue;
+        }
         match arg.as_str() {
             "-h" | "--help" => {
                 print!("{USAGE}");
@@ -58,7 +66,7 @@ fn main() -> glib::ExitCode {
                 return glib::ExitCode::SUCCESS;
             }
             "-w" | "--wait" => wait = true,
-            "--" => {}
+            "--" => options_done = true,
             other if other.starts_with('-') && other.len() > 1 => {
                 eprint!("omamv: unknown option {other}\n\n{USAGE}");
                 return glib::ExitCode::FAILURE;
@@ -87,29 +95,46 @@ fn main() -> glib::ExitCode {
     }
     let app = adw::Application::builder().application_id(APP_ID).flags(flags).build();
     app.connect_startup(|app| ui::startup(app));
-    app.connect_activate(|app| ui::open(app, None));
+    app.connect_activate(|app| {
+        ui::open(app, None);
+    });
     app.connect_command_line(|app, cmd| {
         let cwd = cmd.cwd().unwrap_or_else(|| PathBuf::from("."));
+        // The arguments were checked in the process that started, and are
+        // paths only; `-w` comes as OMAMV_WAIT in that process's environment.
+        let wait = cmd.getenv(WAIT).is_some();
         let targets: Vec<PathBuf> = cmd
             .arguments()
             .into_iter()
             .skip(1)
             .filter_map(|a| a.to_str().map(str::to_owned))
-            .filter(|a| !a.starts_with('-'))
             .map(|a| cwd.join(a))
             .collect();
+        let mut opened = Vec::new();
         if targets.is_empty() {
-            ui::open(app, None);
+            opened.extend(ui::open(app, None));
         }
         for t in targets {
-            ui::open(app, Some(t.canonicalize().unwrap_or(t)));
+            opened.extend(ui::open(app, Some(t.canonicalize().unwrap_or(t))));
+        }
+        // -w: the command that asked waits until its windows close; holding
+        // its command line keeps it waiting, even in another process.
+        if wait {
+            for w in opened {
+                w.hold(cmd);
+            }
         }
         glib::ExitCode::SUCCESS
     });
     // The arguments were checked above; GApplication hands them to the first
     // instance, which may be another process already running.
+    if wait {
+        // SAFETY: still one thread; GApplication sends the environment along.
+        unsafe { std::env::set_var(WAIT, "1") };
+    }
+    // GLib reads anything starting with '-' as its own option.
     let mut argv = vec!["omamv".to_owned()];
-    argv.extend(paths);
+    argv.extend(paths.into_iter().map(|p| if p.starts_with('-') { format!("./{p}") } else { p }));
     app.run_with_args(&argv)
 }
 

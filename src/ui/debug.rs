@@ -238,6 +238,10 @@ mod imp {
         let img = js(&w, "String(document.querySelector('img[alt=dot]')?.naturalWidth)").await;
         r.check("local picture shown", img == "40", &img);
         r.note("shot reading", shot(&w, &shots.join("1-reading.png")).await);
+        let closed = (0..20).filter_map(|i| w.tree.row(i)).all(|r| !r.is_expanded());
+        r.check("folders start closed (the open file is at the top)", closed, "");
+        let note = w.status.shown_note().unwrap_or_default();
+        r.check("the load time is shown", note.contains("files read in") && note.contains("first page in"), &note);
         w.update_status();
         r.check("status bar: page keys", w.status.mode() == Some(Mode::Page) && w.status.text().contains("Ctrl+P"), w.status.text());
 
@@ -250,6 +254,16 @@ mod imp {
         let y = js(&w, "String(window.scrollY)").await;
         r.check("j and d scroll", y.parse::<f64>().unwrap_or(0.0) > 300.0, &y);
         r.check("header hairline while scrolled", w.header.has_css_class("om-scrolled"), "");
+        let before = js(&w, "String(window.scrollY)").await.parse::<f64>().unwrap_or(0.0);
+        press(&w, gdk::Key::Down);
+        press(&w, gdk::Key::Down);
+        sleep(150).await;
+        let after = js(&w, "String(window.scrollY)").await.parse::<f64>().unwrap_or(0.0);
+        r.check("↓ scrolls the page, as j does", after > before, format!("{before} -> {after}"));
+        press(&w, gdk::Key::Up);
+        sleep(150).await;
+        let up = js(&w, "String(window.scrollY)").await.parse::<f64>().unwrap_or(0.0);
+        r.check("↑ scrolls back", up < after, format!("{after} -> {up}"));
         press(&w, gdk::Key::G);
         sleep(100).await;
         let bottom = js(&w, "String(Math.round(window.scrollY + innerHeight) >= document.documentElement.scrollHeight - 2)").await;
@@ -278,6 +292,13 @@ mod imp {
         // ---- quick open
         ctrl(&w, gdk::Key::p);
         sleep(300).await;
+        if let Some(qo) = w.quick.borrow().clone() {
+            qo.entry.emit_by_name::<()>("stop-search", &[]);
+        }
+        sleep(300).await;
+        r.check("Esc closes quick open", w.window.visible_dialog().is_none(), "");
+        ctrl(&w, gdk::Key::p);
+        sleep(300).await;
         r.check("Ctrl+P opens quick open", w.window.visible_dialog().is_some(), "");
         r.check("status bar: quick open keys", w.status.mode() == Some(Mode::QuickOpen), format!("{:?}", w.status.mode()));
         let qo = w.quick.borrow().clone();
@@ -292,6 +313,25 @@ mod imp {
         }
         r.check("Enter opens the match", current(&w) == "docs/architecture.md", current(&w));
         r.check("the dialog closed", w.window.visible_dialog().is_none(), "");
+
+        // ---- an HTML report (ADR-0016)
+        nav(&w, || w.open_file(Path::new("docs/report.html"), None, None, true)).await;
+        sleep(300).await;
+        let h1 = js(&w, "document.querySelector('h1')?.textContent || ''").await;
+        r.check("an HTML page is shown", h1 == "Scan report", &h1);
+        let pwned = js(&w, "String(window.__pwned) + ' ' + document.title").await;
+        r.check("its scripts do not run", pwned == "undefined Scan report", &pwned);
+        let lead = js(&w, "getComputedStyle(document.querySelector('.lead')).color").await;
+        r.check("its own stylesheet applies", lead == "rgb(1, 2, 3)", &lead);
+        let img = js(&w, "String(document.querySelector('img[alt=dot]')?.naturalWidth)").await;
+        r.check("its pictures from the folder show", img == "40", &img);
+        let helper = js(&w, "typeof omamv").await;
+        r.check("omamv's keys work on it", helper == "object", &helper);
+        r.note("shot html", shot(&w, &shots.join("2b-html.png")).await);
+        let page = w.web.clone();
+        nav(&w, move || page.evaluate_javascript("document.querySelector('a[href*=\"README\"]').click()", None, None, gtk::gio::Cancellable::NONE, |_| {})).await;
+        r.check("a link from it to Markdown opens here", current(&w) == "README.md", current(&w));
+        nav(&w, || w.open_file(Path::new("docs/architecture.md"), None, None, true)).await;
 
         // ---- links between files
         let page = w.web.clone();
@@ -312,21 +352,29 @@ mod imp {
         r.check("status bar: tree keys", w.status.mode() == Some(Mode::Tree) && w.status.text().contains("h l"), w.status.text());
         r.check("the tree's cursor is drawn on the open file", w.tree.cursor_label().as_deref() == Some(current(&w).rsplit('/').next().unwrap_or("")), format!("{:?}", w.tree.cursor_label()));
         r.note("shot tree", shot(&w, &shots.join("3-tree.png")).await);
+        let open = |i: u32| w.tree.row(i).is_some_and(|r| r.is_expanded());
         press(&w, gdk::Key::Home);
+        if !open(0) {
+            press(&w, gdk::Key::l);
+        }
+        press(&w, gdk::Key::h);
+        r.check("h folds a folder", !open(0), "");
+        press(&w, gdk::Key::l);
+        r.check("l unfolds it", open(0), "");
+        press(&w, gdk::Key::Down);
+        r.check("↓ moves in the tree", w.tree.cursor() == 1, w.tree.cursor());
+        r.check("and the cursor is drawn there", w.tree.cursor_label().as_deref() == Some("adr"), format!("{:?}", w.tree.cursor_label()));
+        press(&w, gdk::Key::Up);
+        r.check("↑ moves back", w.tree.cursor() == 0, w.tree.cursor());
         press(&w, gdk::Key::j);
-        sleep(50).await;
         let row = w.tree.cursor();
         r.check("j moves in the tree", row == 1, row);
-        r.check("and the cursor is drawn there", w.tree.cursor_label().as_deref() == Some("adr"), format!("{:?}", w.tree.cursor_label()));
-        press(&w, gdk::Key::k);
-        press(&w, gdk::Key::h);
-        sleep(50).await;
-        let folded = w.tree.row(0).is_some_and(|r| !r.is_expanded());
-        r.check("h folds a folder", folded, "");
-        press(&w, gdk::Key::l); // unfold docs
-        press(&w, gdk::Key::l); // into it: adr
-        press(&w, gdk::Key::l); // adr opens again folded: unfold it
-        press(&w, gdk::Key::l); // into adr: its first file
+        if !open(1) {
+            press(&w, gdk::Key::Right);
+        }
+        r.check("→ unfolds", open(1), "");
+        press(&w, gdk::Key::Right);
+        r.check("→ again goes into it", w.tree.cursor_label().as_deref() == Some("0001-open-a-folder.md"), format!("{:?}", w.tree.cursor_label()));
         nav(&w, || {
             press(&w, gdk::Key::Return);
         })
@@ -401,6 +449,19 @@ mod imp {
         }
         sleep(300).await;
 
+        // ---- the disk: a save in place reloads the page, and walks nothing
+        let scans = w.scans.get();
+        let loads = w.loads.get();
+        let readme_text = std::fs::read_to_string(root.join("README.md")).unwrap_or_default();
+        let _ = std::fs::write(root.join("README.md"), &readme_text);
+        let reloaded = wait_until(4_000, || w.loads.get() > loads).await;
+        sleep(600).await;
+        r.check("a save reloads the page without walking the folder", reloaded && w.scans.get() == scans, format!("walks {scans} -> {}", w.scans.get()));
+        let _ = std::fs::write(root.join("build/churn.md"), "# Build output\n");
+        sleep(800).await;
+        r.check("an ignored folder is not watched", w.scans.get() == scans, format!("walks {scans} -> {}", w.scans.get()));
+        ready(&w).await;
+
         // ---- the disk: an edit keeps the place
         for _ in 0..12 {
             press(&w, gdk::Key::j);
@@ -432,6 +493,15 @@ mod imp {
         let faded = js(&w, "String(document.body.classList.contains('gone'))").await;
         r.check("its last version stays, faded", faded == "true", &faded);
         r.check("the tree dropped it", !w.scan.borrow().order.contains(&PathBuf::from("README.md")), "");
+        let mut s = crate::settings::get();
+        s.width = crate::settings::Width::Wide;
+        crate::settings::set(s);
+        super::super::apply_settings();
+        sleep(500).await;
+        let still = js(&w, "String(document.body.classList.contains('gone') && !!document.querySelector('h1'))").await;
+        r.check("a settings change keeps the removed file's last version", still == "true", &still);
+        crate::settings::set(crate::settings::Settings::default());
+        super::super::apply_settings();
         r.note("shot gone", shot(&w, &shots.join("6-gone.png")).await);
         let _ = std::fs::write(&readme, &text);
         let back = wait_until(3_000, || !w.gone.get()).await;
@@ -482,7 +552,7 @@ mod imp {
         crate::settings::set(s);
         super::super::apply_settings();
         r.check("tree on the left", w.split.sidebar_position() == gtk::PackType::Start, "");
-        r.check("key hints off hides the status bar", !w.status.widget.is_visible(), "");
+        r.check("key hints off hides the hints, not the bar", w.status.widget.is_visible() && !w.status.hints_shown(), "");
         r.check("text size sets the zoom", (w.web.zoom_level() - 1.25).abs() < 0.01, w.web.zoom_level());
         wait_until(5_000, || w.loads.get() > loads).await;
         ready(&w).await;
@@ -498,7 +568,16 @@ mod imp {
         crate::settings::set(crate::settings::Settings::default());
         super::super::apply_settings();
         ready(&w).await;
-        r.check("defaults back", w.split.sidebar_position() == gtk::PackType::End && w.status.widget.is_visible(), "");
+        r.check("defaults back", w.split.sidebar_position() == gtk::PackType::End && w.status.hints_shown(), "");
+        ctrl(&w, gdk::Key::plus);
+        let zoom = w.web.zoom_level();
+        let mut s = crate::settings::get();
+        s.key_hints = false;
+        crate::settings::set(s);
+        super::super::apply_settings();
+        r.check("a passing Ctrl+plus survives other settings", (w.web.zoom_level() - zoom).abs() < 0.01, format!("{zoom} -> {}", w.web.zoom_level()));
+        crate::settings::set(crate::settings::Settings::default());
+        super::super::apply_settings();
 
         // ---- a folder with nothing to show (ADR-0012)
         w.open_folder(&root.join("src"), None);
@@ -514,6 +593,13 @@ mod imp {
         key(&w, gdk::Key::O, gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK);
         sleep(200).await;
         r.note("shot start", shot(&w, &shots.join("8-start.png")).await);
+        ctrl(&w, gdk::Key::comma);
+        sleep(300).await;
+        r.check("Ctrl+, works on the start screen too", w.window.visible_dialog().is_some_and(|d| d.is::<adw::PreferencesDialog>()), "");
+        if let Some(d) = w.window.visible_dialog() {
+            d.close();
+        }
+        sleep(200).await;
         press(&w, gdk::Key::Escape);
         sleep(100).await;
 

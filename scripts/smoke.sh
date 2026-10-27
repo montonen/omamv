@@ -21,7 +21,10 @@ printf 'fn main() {}\n' > "$case_dir/empty/src/main.rs"
 
 display=""
 for n in $(seq 61 80); do
-  [ -e "${XDG_RUNTIME_DIR:-/tmp}/broadway$((n + 1)).socket" ] && continue
+  sock="${XDG_RUNTIME_DIR:-/tmp}/broadway$((n + 1)).socket"
+  # A server that is gone leaves its socket behind: clear it, then use the slot.
+  if [ -e "$sock" ] && ! pgrep -f "gtk4-broadwayd :$n\$" >/dev/null; then rm -f -- "$sock"; fi
+  [ -e "$sock" ] && continue
   display=$n; break
 done
 [ -n "$display" ] || { echo "smoke.sh: no free Broadway display" >&2; exit 1; }
@@ -56,7 +59,9 @@ launch empty "$case_dir/empty"
 has 'scan done: 0 files' && has 'nothing to show' && pass "a folder with no Markdown says so" || fail "a folder with no Markdown says so"
 
 launch repo "$repo"
-has 'load omamv://w1/README.md' && has '"ready":true' && pass "this repository opens (target/ and .git skipped)" || fail "this repository opens"
+has 'load omamv://w1/README.md' && has '"ready":true' && pass "this repository opens" || fail "this repository opens"
+has 'scan done: 8 files' && pass "  its 8 files found, target/ and .git skipped" || fail "  its 8 files found ($(grep -o 'scan done: [0-9]* files' "$out" | head -1))"
+grep -q 'watching [0-9]* folders' "$out" && [ "$(grep -o 'watching [0-9]* folders' "$out" | head -1 | grep -o '[0-9]*')" -lt 40 ] && pass "  only its own folders watched ($(grep -o 'watching [0-9]* folders' "$out" | head -1))" || fail "  folders watched: $(grep -o 'watching [0-9]* folders' "$out" | head -1)"
 
 launch start
 [ "$status" -eq 124 ] && pass "no folder: the start screen stays open" || fail "no folder: start screen (exit $status)"

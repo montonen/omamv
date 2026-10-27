@@ -1,4 +1,4 @@
-//! The folder tree on the right (ADR-0004): slim, in muted text until it has
+//! The folder tree, on the right or the left (ADR-0004, ADR-0014): slim, in muted text until it has
 //! the keyboard, the open file marked with a hairline of accent.
 //!
 //! The tree keeps its own cursor, so that `j`/`k`/`h`/`l` and the arrows move
@@ -192,7 +192,9 @@ impl Tree {
         });
         self.selection.set_model(Some(&model));
         *self.model.borrow_mut() = Some(model);
-        let open_all = first && scan.order.len() <= 200;
+        // Folders start closed; `mark` opens the ones on the way to the open
+        // file. Opening them all buries a big folder's top level.
+        let open_all = false;
         let mut i = 0;
         while let Some(row) = self.row(i) {
             if let Some(Node::Dir(d)) = node_of(row.upcast_ref())
@@ -210,6 +212,7 @@ impl Tree {
             1 => "1 file".into(),
             _ => format!("{n}{more} files"),
         });
+        self.repaint();
     }
 
     fn expanded(&self) -> HashSet<PathBuf> {
@@ -248,6 +251,7 @@ impl Tree {
                     self.selection.set_selected(i);
                     self.cursor.set(i);
                     self.list.scroll_to(i, gtk::ListScrollFlags::NONE, None);
+                    self.repaint();
                     return;
                 }
                 _ => {}
@@ -255,6 +259,7 @@ impl Tree {
             i += 1;
         }
         self.selection.set_selected(gtk::INVALID_LIST_POSITION);
+        self.repaint();
     }
 
     /// Give the tree the keyboard, on the open file.

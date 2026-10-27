@@ -118,14 +118,11 @@ fn follow_theme() {
 
 /// Open `target` (a folder, or a file in one) or, with none, bring a window
 /// forward. A folder already open has its window brought forward.
-pub fn open(app: &adw::Application, target: Option<PathBuf>) {
+pub fn open(app: &adw::Application, target: Option<PathBuf>) -> Option<Rc<Win>> {
     let Some(target) = target else {
-        if let Some(w) = windows().into_iter().last() {
-            w.window.present();
-        } else {
-            Win::new(app).window.present();
-        }
-        return;
+        let w = windows().into_iter().last().unwrap_or_else(|| Win::new(app));
+        w.window.present();
+        return Some(w);
     };
     let (root, file) = split_target(&target);
     let open = windows();
@@ -138,6 +135,7 @@ pub fn open(app: &adw::Application, target: Option<PathBuf>) {
     win.open_folder(&root, file);
     win.window.present();
     debug::maybe_start(&win);
+    Some(win)
 }
 
 /// A folder is itself; a file is its folder, and the file in it.
