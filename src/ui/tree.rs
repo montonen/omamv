@@ -161,7 +161,11 @@ impl Tree {
         self.name.set_label(root_name);
         let n = scan.order.len();
         let more = if scan.truncated { "+" } else { "" };
-        self.count.set_label(&if n == 1 { "1 file".into() } else { format!("{n}{more} files") });
+        self.count.set_label(&match n {
+            0 => "0 files".into(),
+            1 => "1 file".into(),
+            _ => format!("{n}{more} files"),
+        });
     }
 
     fn expanded(&self) -> HashSet<PathBuf> {

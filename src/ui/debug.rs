@@ -423,6 +423,15 @@ mod imp {
             r.note("shot light", shot(&w, &shots.join("7-light.png")).await);
         }
 
+        // ---- a folder with nothing to show (ADR-0012)
+        w.open_folder(&root.join("src"), None);
+        let said = wait_until(3_000, || w.showing() == "empty").await;
+        r.check("an empty folder says so", said, w.showing());
+        r.note("shot empty", shot(&w, &shots.join("9-empty.png")).await);
+        w.open_folder(&root, None);
+        let back = wait_until(3_000, || w.showing() == "doc").await && ready(&w).await;
+        r.check("a folder with files shows its first one", back && current(&w) == "README.md", current(&w));
+
         // ---- start screen
         ctrl(&w, gdk::Key::O);
         key(&w, gdk::Key::O, gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK);

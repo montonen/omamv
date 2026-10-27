@@ -84,6 +84,7 @@ pub struct Win {
     pub split: adw::OverlaySplitView,
     pub tree: Rc<Tree>,
     stack: gtk::Stack,
+    empty_page: adw::StatusPage,
     pub start: Rc<Start>,
     find_button: gtk::Button,
     tree_button: gtk::ToggleButton,
@@ -234,6 +235,21 @@ impl Win {
         });
         stack.add_named(&start.widget, Some("start"));
         stack.add_named(&split, Some("doc"));
+        // ADR-0012: the window, not the page, says what the folder holds.
+        let reading_page = adw::StatusPage::builder().title("Reading the folder…").build();
+        stack.add_named(&reading_page, Some("reading"));
+        let other = gtk::Button::builder()
+            .label("Open another folder…")
+            .action_name("win.open-folder")
+            .halign(gtk::Align::Center)
+            .build();
+        other.add_css_class("pill");
+        let empty_page = adw::StatusPage::builder()
+            .title("No Markdown or text files here")
+            .description("omamv shows .md and .txt files, in this folder and the folders below it. Hidden folders and anything .gitignore leaves out are skipped.")
+            .child(&other)
+            .build();
+        stack.add_named(&empty_page, Some("empty"));
 
         let win = Rc::new(Win {
             window,
@@ -254,6 +270,7 @@ impl Win {
             split,
             tree,
             stack,
+            empty_page,
             start,
             find_button,
             tree_button,
@@ -281,6 +298,11 @@ impl Win {
         win.wire(&ucm, &menu_button);
         win.show_start();
         win
+    }
+
+    /// Which screen the window shows: start, reading, empty or doc.
+    pub fn showing(&self) -> String {
+        self.stack.visible_child_name().map(|s| s.to_string()).unwrap_or_default()
     }
 
     pub fn root(&self) -> Option<PathBuf> {
@@ -322,7 +344,6 @@ impl Win {
                 && let Some(w) = weak.upgrade()
             {
                 w.loads.set(w.loads.get() + 1);
-                w.expect.borrow_mut().clear();
             }
         });
 
@@ -510,6 +531,13 @@ impl Win {
             _ => {}
         }
 
+        if matches!(self.stack.visible_child_name().as_deref(), Some("reading" | "empty")) {
+            if name == "question" && !typing && !ctrl {
+                self.show_keys();
+                return true;
+            }
+            return false;
+        }
         if self.stack.visible_child_name().as_deref() == Some("start") {
             if typing || ctrl || alt {
                 return false;
@@ -519,8 +547,9 @@ impl Win {
                 return true;
             }
             if name == "Escape" && self.root.borrow().is_some() {
-                self.stack.set_visible_child_name("doc");
-                self.set_chrome(true);
+                let empty = self.scan.borrow().order.is_empty();
+                self.stack.set_visible_child_name(if empty { "empty" } else { "doc" });
+                self.set_chrome(!empty);
                 self.web.grab_focus();
                 return true;
             }
@@ -675,28 +704,39 @@ impl Win {
         *self.current.borrow_mut() = None;
         self.gone.set(false);
         self.banner.set_revealed(false);
-        self.stack.set_visible_child_name("doc");
-        self.set_chrome(true);
+        self.stack.set_visible_child_name("reading");
+        self.set_chrome(false);
         self.title.set_label(&folder::file_name(&root));
         self.subtitle.set_label(&folder::tilde(&root));
         self.web.load_html(&crate::render::wrap("", "", &scheme::palette()), None);
 
-        // Follow the disk.
+        // Follow the disk. Watching every folder below a big one takes a
+        // second or more, so it is set up off the main thread.
         *self.watcher.borrow_mut() = None;
-        if let Some((watcher, rx)) = crate::watch::start(&root) {
-            *self.watcher.borrow_mut() = Some(watcher);
-            let weak = self.weak();
-            let watched = root.clone();
-            glib::spawn_future_local(async move {
-                while let Ok(change) = rx.recv().await {
-                    let Some(w) = weak.upgrade() else { break };
-                    if w.root.borrow().as_deref() != Some(watched.as_path()) {
-                        break;
-                    }
-                    w.on_change(&change.path);
+        let (tx, rx) = async_channel::bounded(1);
+        let watch_root = root.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send_blocking(crate::watch::start(&watch_root));
+        });
+        let weak = self.weak();
+        let watched = root.clone();
+        glib::spawn_future_local(async move {
+            let Ok(Some((watcher, changes))) = rx.recv().await else { return };
+            {
+                let Some(w) = weak.upgrade() else { return };
+                if w.root.borrow().as_deref() != Some(watched.as_path()) {
+                    return;
                 }
-            });
-        }
+                *w.watcher.borrow_mut() = Some(watcher);
+            }
+            while let Ok(change) = changes.recv().await {
+                let Some(w) = weak.upgrade() else { break };
+                if w.root.borrow().as_deref() != Some(watched.as_path()) {
+                    break;
+                }
+                w.on_change(&change.path);
+            }
+        });
         self.rescan(true, file);
     }
 
@@ -716,12 +756,21 @@ impl Win {
                 return;
             }
             w.tree.show(&folder::file_name(&root), &scan, first);
-            let pick = open.filter(|f| scan.order.contains(f)).or_else(|| if first { folder::first_file(&scan) } else { None });
+            let empty = scan.order.is_empty();
+            let showing = w.stack.visible_child_name();
+            if matches!(showing.as_deref(), Some("reading" | "empty" | "doc")) {
+                w.stack.set_visible_child_name(if empty { "empty" } else { "doc" });
+                w.set_chrome(!empty);
+            }
+            let nothing_open = w.current.borrow().is_none();
+            let pick = open
+                .filter(|f| scan.order.contains(f))
+                .or_else(|| if first || nothing_open { folder::first_file(&scan) } else { None });
             *w.scan.borrow_mut() = scan;
             if let Some(f) = pick {
                 w.open_file(&f, None, None, true);
                 w.web.grab_focus();
-            } else if first {
+            } else if empty {
                 w.empty_folder();
             } else {
                 let cur = w.current.borrow().clone();
@@ -732,10 +781,9 @@ impl Win {
 
     fn empty_folder(&self) {
         self.title.set_label(&self.root().map(|r| folder::file_name(&r)).unwrap_or_default());
-        let body = "<h1>Nothing to read here</h1><p>This folder has no Markdown or text files, \
-                    and none in the folders below it. Hidden folders and anything <code>.gitignore</code> leaves out are skipped.</p>\
-                    <p>Open another folder with <kbd>Ctrl</kbd>+<kbd>O</kbd>.</p>";
-        self.web.load_html(&crate::render::wrap("omamv", body, &scheme::palette()), None);
+        *self.current.borrow_mut() = None;
+        self.window.set_title(Some("omamv"));
+        self.empty_page.grab_focus();
     }
 
     // -------------------------------------------------------------- files

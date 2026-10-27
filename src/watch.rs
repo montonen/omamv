@@ -63,3 +63,16 @@ mod tests {
         assert!(counts(&EventKind::Modify(ModifyKind::Data(DataChange::Content))));
     }
 }
+
+#[cfg(test)]
+mod probe {
+    /// `OMAMV_PROBE=<dir> cargo test watch_probe -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn watch_probe() {
+        let dir = std::env::var("OMAMV_PROBE").unwrap();
+        let t = std::time::Instant::now();
+        let w = super::start(std::path::Path::new(&dir));
+        eprintln!("watch started: {} in {:?}", w.is_some(), t.elapsed());
+    }
+}

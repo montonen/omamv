@@ -198,3 +198,16 @@ mod tests {
         assert_eq!(first_file(&scan), Some(p("docs/a.md")));
     }
 }
+
+#[cfg(test)]
+mod probe {
+    /// `OMAMV_PROBE=<dir> cargo test probe -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn probe() {
+        let dir = std::env::var("OMAMV_PROBE").unwrap();
+        let t = std::time::Instant::now();
+        let s = super::scan(std::path::Path::new(&dir));
+        eprintln!("{} files in {:?}, truncated {}: {:?}", s.order.len(), t.elapsed(), s.truncated, &s.order[..s.order.len().min(8)]);
+    }
+}
