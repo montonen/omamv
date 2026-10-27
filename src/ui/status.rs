@@ -26,7 +26,7 @@ impl Mode {
         match self {
             Mode::Page => &[
                 ("j k ↓ ↑", "scroll"),
-                ("d u", "half page"),
+                ("o", "outline"),
                 ("Ctrl+P", "open a file"),
                 ("] [", "next / previous file"),
                 ("Ctrl+B", "tree"),
@@ -43,7 +43,7 @@ impl Mode {
             ],
             Mode::Find => &[("Enter", "next"), ("Shift+Enter", "previous"), ("Esc", "close, keep the place")],
             Mode::Dialog => &[("Esc", "close")],
-            Mode::QuickOpen => &[("↑ ↓", "move"), ("Enter", "open"), ("Alt+1", "open the first"), ("Esc", "close")],
+            Mode::QuickOpen => &[("↑ ↓", "move"), ("Enter", "open"), ("Alt+1", "the first"), ("Esc", "close")],
             Mode::Start => &[("1 9", "open a recent folder"), ("j k", "move"), ("Enter", "open"), ("Ctrl+O", "choose a folder"), ("?", "all keys")],
             Mode::Empty => &[("Ctrl+O", "choose a folder"), ("Ctrl+Shift+O", "recent folders"), ("?", "all keys")],
             Mode::Reading => &[],

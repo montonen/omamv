@@ -44,7 +44,9 @@ Press `?` in the window for all of them.
 | Keys | |
 | --- | --- |
 | `j` `k` or `↓` `↑` · `d` `u` · `Space` · `g g` `G` | scroll |
-| `Ctrl+P` | open a file by name |
+| `Ctrl+P` | open a file: newest first, with ages; type to find any |
+| `o` | outline: go to a heading |
+| `y` | copy the file's path |
 | `]` `[` or `J` `K` | next / previous file |
 | `Ctrl+B` | folder tree: focus, or hide (`j k h l`, arrows, `Enter`, `Esc` inside) |
 | `Ctrl+F` or `/` · `n` `N` | find |
@@ -53,7 +55,9 @@ Press `?` in the window for all of them.
 | `Ctrl+,` | settings |
 
 The status bar shows the keys that matter where the keyboard is, and, when a
-folder opens, how fast it was read and drawn.
+folder opens, how fast it was read and drawn. A file that appears on disk
+(an agent's new report) is named there too. YAML front matter shows as a
+small block of facts above the text.
 
 A folder opens on its README (then an index, then its first file), or, if
 Settings say so, on quick open with nothing shown until you pick.

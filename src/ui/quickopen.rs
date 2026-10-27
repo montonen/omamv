@@ -1,34 +1,65 @@
-//! Quick open (Ctrl+P): any file in the folder by a few letters of its path.
-//! With nothing typed it lists the files read in this window, newest first,
-//! then the rest in tree order.
+//! Pick one by a few letters: quick open (Ctrl+P), any file in the folder,
+//! newest first with its age (ADR-0017); and the outline (`o`), the headings
+//! of the open document in their order.
 
-use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
 
-use crate::folder;
 use crate::fuzzy;
 
-const SHOWN: usize = 60;
+/// One line to pick.
+pub struct Item {
+    /// What the letters typed are matched against.
+    pub text: String,
+    /// Where the name starts in `text`, in chars; what comes before (a
+    /// file's folder) is shown dimmed after the name.
+    pub name_from: usize,
+    /// On the right, dimmed: a file's age.
+    pub aside: String,
+    /// Steps in from the left: a heading's depth.
+    pub indent: i32,
+}
+
+impl Item {
+    /// A file, by its path from the root.
+    pub fn file(path: &std::path::Path, aside: String) -> Item {
+        let text = path.to_string_lossy().into_owned();
+        let name_from = text.rfind('/').map_or(0, |i| text[..=i].chars().count());
+        Item { text, name_from, aside, indent: 0 }
+    }
+}
+
+pub struct Kind {
+    pub title: &'static str,
+    pub placeholder: &'static str,
+    pub none: &'static str,
+    /// Lines shown at most.
+    pub shown: usize,
+}
+
+pub const FILES: Kind = Kind { title: "Open a file", placeholder: "Open a file by name", none: "No file by that name", shown: 60 };
+pub const OUTLINE: Kind = Kind { title: "Outline", placeholder: "Go to a heading", none: "No heading by that name", shown: 400 };
 
 pub struct QuickOpen {
     pub dialog: adw::Dialog,
     pub entry: gtk::SearchEntry,
     pub list: gtk::ListBox,
     scroller: gtk::ScrolledWindow,
-    files: Vec<PathBuf>,
-    recent: Vec<PathBuf>,
+    items: Vec<Item>,
+    kind: Kind,
     accent: String,
-    shown: std::cell::RefCell<Vec<PathBuf>>,
-    on_open: Box<dyn Fn(PathBuf)>,
+    shown: std::cell::RefCell<Vec<usize>>,
+    on_open: Box<dyn Fn(usize)>,
 }
 
 impl QuickOpen {
-    pub fn new(files: Vec<PathBuf>, recent: Vec<PathBuf>, accent: &str, on_open: impl Fn(PathBuf) + 'static) -> Rc<Self> {
+    /// `items` in the order shown with nothing typed; `on_open` gets the
+    /// index of the one picked.
+    pub fn new(kind: Kind, items: Vec<Item>, accent: &str, on_open: impl Fn(usize) + 'static) -> Rc<Self> {
         let entry = gtk::SearchEntry::builder()
-            .placeholder_text("Open a file by name")
+            .placeholder_text(kind.placeholder)
             .hexpand(true)
             .build();
         entry.add_css_class("om-qo-entry");
@@ -48,7 +79,7 @@ impl QuickOpen {
         body.append(&entry);
         body.append(&scroller);
         let dialog = adw::Dialog::builder()
-            .title("Open a file")
+            .title(kind.title)
             .content_width(620)
             .child(&body)
             .build();
@@ -59,8 +90,8 @@ impl QuickOpen {
             entry,
             list,
             scroller,
-            files,
-            recent,
+            items,
+            kind,
             accent: accent.to_owned(),
             shown: Default::default(),
             on_open: Box::new(on_open),
@@ -121,27 +152,25 @@ impl QuickOpen {
         self.entry.grab_focus();
     }
 
-    /// The paths shown for a query, best first.
-    pub fn matches(&self, query: &str) -> Vec<(PathBuf, Vec<usize>)> {
+    /// The items shown for a query, best first: (index, matched chars).
+    /// Equal scores keep the given order (newest first, document order).
+    pub fn matches(&self, query: &str) -> Vec<(usize, Vec<usize>)> {
         if query.trim().is_empty() {
-            let mut out: Vec<PathBuf> = Vec::new();
-            for f in self.recent.iter().chain(self.files.iter()) {
-                if !out.contains(f) && self.files.contains(f) {
-                    out.push(f.clone());
-                }
-            }
-            return out.into_iter().take(SHOWN).map(|p| (p, Vec::new())).collect();
+            return (0..self.items.len()).take(self.kind.shown).map(|i| (i, Vec::new())).collect();
         }
-        let mut scored: Vec<(i64, PathBuf, Vec<usize>)> = self
-            .files
+        let mut scored: Vec<(i64, usize, Vec<usize>)> = self
+            .items
             .iter()
-            .filter_map(|f| {
-                let s = f.to_string_lossy();
-                fuzzy::score(query, &s).map(|m| (m.score, f.clone(), m.positions))
-            })
+            .enumerate()
+            .filter_map(|(i, it)| fuzzy::score(query, &it.text).map(|m| (m.score, i, m.positions)))
             .collect();
         scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-        scored.into_iter().take(SHOWN).map(|(_, p, m)| (p, m)).collect()
+        scored.into_iter().take(self.kind.shown).map(|(_, i, m)| (i, m)).collect()
+    }
+
+    /// The texts shown for a query (for the checks).
+    pub fn texts(&self, query: &str) -> Vec<String> {
+        self.matches(query).into_iter().map(|(i, _)| self.items[i].text.clone()).collect()
     }
 
     fn refresh(&self) {
@@ -150,25 +179,23 @@ impl QuickOpen {
         }
         let matches = self.matches(&self.entry.text());
         if matches.is_empty() {
-            let none = gtk::Label::builder().label("No file by that name").xalign(0.0).build();
+            let none = gtk::Label::builder().label(self.kind.none).xalign(0.0).build();
             none.add_css_class("om-qo-empty");
             let row = gtk::ListBoxRow::builder().child(&none).activatable(false).selectable(false).build();
             self.list.append(&row);
         }
-        for (path, positions) in &matches {
-            self.list.append(&self.row(path, positions));
+        for (i, positions) in &matches {
+            self.list.append(&self.row(&self.items[*i], positions));
         }
-        *self.shown.borrow_mut() = matches.into_iter().map(|(p, _)| p).collect();
+        *self.shown.borrow_mut() = matches.into_iter().map(|(i, _)| i).collect();
         if let Some(first) = self.list.row_at_index(0) {
             self.list.select_row(Some(&first));
         }
     }
 
-    fn row(&self, path: &std::path::Path, positions: &[usize]) -> gtk::ListBoxRow {
-        let full = path.to_string_lossy();
-        let name_start = full.rfind('/').map_or(0, |i| i + 1);
-        let chars: Vec<char> = full.chars().collect();
-        let name_from = full[..name_start].chars().count();
+    fn row(&self, item: &Item, positions: &[usize]) -> gtk::ListBoxRow {
+        let chars: Vec<char> = item.text.chars().collect();
+        let name_from = item.name_from;
         let marked = |from: usize, to: usize| -> String {
             let mut s = String::new();
             for (i, c) in chars.iter().enumerate().take(to).skip(from) {
@@ -194,9 +221,14 @@ impl QuickOpen {
             dir.set_markup(&marked(0, name_from.saturating_sub(1)));
         }
         let b = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        b.set_margin_start(item.indent * 16);
         b.append(&name);
         b.append(&dir);
-        b.set_tooltip_text(Some(&folder::file_name(path)));
+        if !item.aside.is_empty() {
+            let aside = gtk::Label::new(Some(&item.aside));
+            aside.add_css_class("om-qo-aside");
+            b.append(&aside);
+        }
         gtk::ListBoxRow::builder().child(&b).build()
     }
 
@@ -228,8 +260,42 @@ impl QuickOpen {
     }
 
     fn open_at(&self, at: usize) {
-        let Some(path) = self.shown.borrow().get(at).cloned() else { return };
+        let Some(i) = self.shown.borrow().get(at).copied() else { return };
         self.dialog.close();
-        (self.on_open)(path);
+        (self.on_open)(i);
+    }
+}
+
+/// How long ago, in a few characters: "now", "4 min", "3 h", "2 d", "5 mo", "2 y".
+pub fn age(secs: u64) -> String {
+    match secs {
+        0..60 => "now".into(),
+        60..3_600 => format!("{} min", secs / 60),
+        3_600..86_400 => format!("{} h", secs / 3_600),
+        86_400..5_184_000 => format!("{} d", secs / 86_400),
+        5_184_000..63_072_000 => format!("{} mo", secs / 2_592_000),
+        _ => format!("{} y", secs / 31_536_000),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ages_read_short() {
+        assert_eq!(age(5), "now");
+        assert_eq!(age(4 * 60 + 10), "4 min");
+        assert_eq!(age(3 * 3600), "3 h");
+        assert_eq!(age(2 * 86_400), "2 d");
+        assert_eq!(age(150 * 86_400), "5 mo");
+        assert_eq!(age(800 * 86_400), "2 y");
+    }
+
+    #[test]
+    fn a_file_shows_its_name_first() {
+        let it = Item::file(std::path::Path::new("docs/adr/0001-x.md"), String::new());
+        assert_eq!(it.name_from, "docs/adr/".len());
+        assert_eq!(Item::file(std::path::Path::new("README.md"), String::new()).name_from, 0);
     }
 }

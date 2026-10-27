@@ -292,6 +292,10 @@ mod imp {
         r.check("Alt+Right goes forward", current(&w) == "README.md", current(&w));
 
         // ---- quick open
+        // An agent rewrote this one just now: it comes first (ADR-0017).
+        if let Ok(f) = std::fs::File::options().write(true).open(root.join("notes/todo.txt")) {
+            let _ = f.set_modified(std::time::SystemTime::now());
+        }
         ctrl(&w, gdk::Key::p);
         sleep(300).await;
         if let Some(qo) = w.quick.borrow().clone() {
@@ -305,8 +309,8 @@ mod imp {
         r.check("status bar: quick open keys", w.status.mode() == Some(Mode::QuickOpen), format!("{:?}", w.status.mode()));
         let qo = w.quick.borrow().clone();
         if let Some(qo) = qo {
-            let empty = qo.matches("");
-            r.check("empty query starts with files just read", empty.first().is_some_and(|(p, _)| p == Path::new("README.md")), format!("{:?}", empty.first().map(|m| &m.0)));
+            let empty = qo.texts("");
+            r.check("empty query starts with the newest file", empty.first().is_some_and(|p| p == "notes/todo.txt"), format!("{:?}", empty.first()));
             qo.entry.set_text("arch");
             sleep(300).await;
             r.note("shot quick open", shot(&w, &shots.join("2-quick-open.png")).await);
@@ -315,6 +319,33 @@ mod imp {
         }
         r.check("Enter opens the match", current(&w) == "docs/architecture.md", current(&w));
         r.check("the dialog closed", w.window.visible_dialog().is_none(), "");
+
+        // ---- the outline, copy the path, a new file (ADR-0017)
+        let heads = crate::render::headings(&std::fs::read_to_string(root.join("docs/architecture.md")).unwrap_or_default());
+        press(&w, gdk::Key::o);
+        sleep(300).await;
+        let qo = w.quick.borrow().clone();
+        r.check("o opens the outline", w.keyboard_mode() == Mode::QuickOpen && qo.is_some(), format!("{:?}", w.keyboard_mode()));
+        if let Some(qo) = qo {
+            let texts = qo.texts("");
+            r.check("the outline lists the headings in order", !heads.is_empty() && texts == heads.iter().map(|h| h.1.clone()).collect::<Vec<_>>(), format!("{texts:?}"));
+            if let Some(last) = heads.last() {
+                qo.entry.set_text(&last.1);
+                sleep(200).await;
+                qo.entry.emit_activate();
+            }
+            sleep(300).await;
+            r.check("a heading picked closes the outline", w.window.visible_dialog().is_none() && current(&w) == "docs/architecture.md", current(&w));
+        }
+        press(&w, gdk::Key::y);
+        r.check("y copies the file's path", w.status.shown_note().is_some_and(|n| n.starts_with("copied ") && n.ends_with("docs/architecture.md")), format!("{:?}", w.status.shown_note()));
+        let report_md = root.join("notes/agent-report.md");
+        let _ = std::fs::write(&report_md, "# Agent report\n");
+        let named = wait_until(4_000, || w.status.shown_note().is_some_and(|n| n.contains("notes/agent-report.md"))).await;
+        r.check("a new file is named in the status bar", named, format!("{:?}", w.status.shown_note()));
+        let _ = std::fs::remove_file(&report_md);
+        let dropped = wait_until(4_000, || !w.scan.borrow().order.iter().any(|f| f.ends_with("agent-report.md"))).await;
+        r.check("and dropped again when removed", dropped, "");
 
         // ---- an HTML report (ADR-0016): off by default, then on
         let html_page = PathBuf::from("docs/report.html");

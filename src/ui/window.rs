@@ -16,7 +16,7 @@ use gtk::{gdk, gio, glib};
 use webkit6::prelude::*;
 use webkit6::{NavigationPolicyDecision, PolicyDecisionType, WebView};
 
-use super::quickopen::QuickOpen;
+use super::quickopen::{Item, QuickOpen};
 use super::start::Start;
 use super::status::{Mode, Status};
 use super::tree::Tree;
@@ -122,6 +122,8 @@ pub struct Win {
     /// Walks of the folder so far (the checks count them).
     pub scans: Cell<u32>,
     pub gone: Cell<bool>,
+    /// The next walk follows a change on disk: files new to it are named.
+    from_disk: Cell<bool>,
     pending_g: Cell<bool>,
     reload_timer: RefCell<Option<glib::SourceId>>,
     rescan_timer: RefCell<Option<glib::SourceId>>,
@@ -325,6 +327,7 @@ impl Win {
             scan_ms: Cell::new(0),
             scans: Cell::new(0),
             gone: Cell::new(false),
+            from_disk: Cell::new(false),
             pending_g: Cell::new(false),
             reload_timer: RefCell::new(None),
             rescan_timer: RefCell::new(None),
@@ -734,6 +737,8 @@ impl Win {
             "bracketright" | "J" => self.step_file(1),
             "bracketleft" | "K" => self.step_file(-1),
             "slash" => self.open_find(),
+            "o" => self.outline(),
+            "y" => self.copy_path(),
             "n" => self.find_again(1),
             "N" => self.find_again(-1),
             "question" => self.show_keys(),
@@ -865,6 +870,7 @@ impl Win {
     /// when what it shows changed.
     fn rescan(&self, first: bool) {
         let Some(root) = self.root() else { return };
+        let from_disk = self.from_disk.replace(false) && !first;
         self.scans.set(self.scans.get() + 1);
         let (tx, rx) = async_channel::bounded(1);
         let walk_root = root.clone();
@@ -911,6 +917,9 @@ impl Win {
             let ask_now = first && asked.is_none() && by_name && !empty;
             let pick = asked.or_else(|| if (first || nothing_open) && !by_name { folder::first_file(&scan) } else { None });
             trace!("pick {pick:?}");
+            if from_disk {
+                w.name_new_files(&scan);
+            }
             *w.scan.borrow_mut() = scan;
             if ask_now {
                 w.pick_a_file();
@@ -925,6 +934,21 @@ impl Win {
             }
             w.update_status();
         });
+    }
+
+    /// Files that appeared on disk since the last walk, in the status bar
+    /// (ADR-0017): an agent just wrote a report. Ctrl+P lists it first.
+    fn name_new_files(&self, scan: &Scan) {
+        let new: Vec<PathBuf> = {
+            let old = self.scan.borrow();
+            let known: std::collections::HashSet<&PathBuf> = old.order.iter().collect();
+            scan.order.iter().filter(|f| !known.contains(f)).cloned().collect()
+        };
+        match new.as_slice() {
+            [] => {}
+            [one] => self.status.note(&format!("new: {} · Ctrl+P", one.display())),
+            many => self.status.note(&format!("{} new files · Ctrl+P", many.len())),
+        }
     }
 
     /// A clean page and quick open: the reader names the file.
@@ -1141,6 +1165,7 @@ impl Win {
                 }
                 Timer::Rescan => {
                     w.rescan_timer.borrow_mut().take();
+                    w.from_disk.set(true);
                     w.rescan(false);
                 }
             }
@@ -1212,32 +1237,89 @@ impl Win {
 
     // ------------------------------------------------------------ tools
 
+    /// Quick open: every file, the newest first, with its age (ADR-0017).
+    /// The ages are read now, not at the scan: a report rewritten since
+    /// counts as new.
     pub fn quick_open(&self) {
+        let Some(root) = self.root() else { return };
         let files = self.scan.borrow().order.clone();
         if files.is_empty() {
             return;
         }
-        let mut recent: Vec<PathBuf> = self.history.borrow().iter().rev().map(|v| v.file.clone()).collect();
-        recent.dedup();
+        let t = std::time::Instant::now();
+        let now = std::time::SystemTime::now();
+        let mut dated: Vec<(Option<std::time::SystemTime>, PathBuf)> =
+            files.into_iter().map(|f| (root.join(&f).metadata().and_then(|m| m.modified()).ok(), f)).collect();
+        // Newest first; the tree's order among equals (sort_by is stable).
+        dated.sort_by_key(|d| std::cmp::Reverse(d.0));
+        let items: Vec<Item> = dated
+            .iter()
+            .map(|(m, f)| {
+                let age = m.and_then(|m| now.duration_since(m).ok()).map(|d| super::quickopen::age(d.as_secs())).unwrap_or_default();
+                Item::file(f, age)
+            })
+            .collect();
+        trace!("quick open: {} files dated in {} µs", items.len(), t.elapsed().as_micros());
+        let paths: Vec<PathBuf> = dated.into_iter().map(|(_, f)| f).collect();
         let weak = self.weak();
-        let qo = QuickOpen::new(files, recent, &scheme::palette().accent, move |file| {
+        let qo = QuickOpen::new(super::quickopen::FILES, items, &scheme::palette().accent, move |i| {
             if let Some(w) = weak.upgrade() {
-                w.open_file(&file, None, None, true);
+                w.open_file(&paths[i], None, None, true);
                 w.web.grab_focus();
             }
         });
+        self.present_picker(qo);
+    }
+
+    /// The outline (`o`): the open document's headings, to jump to one.
+    pub fn outline(&self) {
+        let (Some(root), Some(file)) = (self.root(), self.current.borrow().clone()) else { return };
+        if !folder::is_markdown(&file) {
+            self.status.note("only Markdown has an outline");
+            return;
+        }
+        let heads = std::fs::read_to_string(root.join(&file)).map(|t| crate::render::headings(&t)).unwrap_or_default();
+        if heads.is_empty() {
+            self.status.note("no headings in this file");
+            return;
+        }
+        let top = heads.iter().map(|h| h.0).min().unwrap_or(1);
+        let items = heads
+            .iter()
+            .map(|(level, text, _)| Item { text: text.clone(), name_from: 0, aside: String::new(), indent: i32::from(level - top) })
+            .collect();
+        let ids: Vec<String> = heads.into_iter().map(|h| h.2).collect();
+        let weak = self.weak();
+        let qo = QuickOpen::new(super::quickopen::OUTLINE, items, &scheme::palette().accent, move |i| {
+            if let Some(w) = weak.upgrade() {
+                w.js(&format!("document.getElementById({})?.scrollIntoView({{block:'start',behavior:'instant'}})", js_string(&ids[i])));
+                w.web.grab_focus();
+            }
+        });
+        self.present_picker(qo);
+    }
+
+    fn present_picker(&self, qo: Rc<QuickOpen>) {
         // Noted first: the status bar asks which dialog it is as it appears.
         *self.quick.borrow_mut() = Some(qo.clone());
         let weak = self.weak();
         qo.dialog.connect_closed(move |_| {
             if let Some(w) = weak.upgrade() {
-                // Not while the self-check still reads it; the next Ctrl+P replaces it anyway.
+                // Not while the self-check still reads it; the next one replaces it anyway.
                 if !super::debug::driven() {
                     w.quick.borrow_mut().take();
                 }
             }
         });
         qo.present(&self.window);
+    }
+
+    /// `y`: the open file's full path to the clipboard.
+    fn copy_path(&self) {
+        let (Some(root), Some(file)) = (self.root(), self.current.borrow().clone()) else { return };
+        let full = root.join(&file);
+        self.window.clipboard().set_text(&full.to_string_lossy());
+        self.status.note(&format!("copied {}", folder::tilde(&full)));
     }
 
     pub fn open_find(&self) {

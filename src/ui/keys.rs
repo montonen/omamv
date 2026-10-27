@@ -14,6 +14,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("d / u", "half a page"),
             ("Space / Shift+Space", "a page"),
             ("g g / G", "top / end"),
+            ("o", "outline: go to a heading"),
             ("Tab / Shift+Tab", "next / previous link"),
             ("Enter", "follow the link"),
             ("Alt+← / Alt+→", "back / forward"),
@@ -23,7 +24,8 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
     (
         "FILES",
         &[
-            ("Ctrl+P", "open a file by name"),
+            ("Ctrl+P", "open a file, newest first"),
+            ("y", "copy the file's path"),
             ("] / [", "next / previous file"),
             ("J / K", "next / previous file"),
             ("Ctrl+B", "folder tree: focus, or hide"),

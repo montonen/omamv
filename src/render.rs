@@ -120,12 +120,98 @@ impl Trusted {
     }
 }
 
+/// GitHub's extensions, and front matter as its own block.
+const OPTS: Options = Options::ENABLE_TABLES
+    .union(Options::ENABLE_STRIKETHROUGH)
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_FOOTNOTES)
+    .union(Options::ENABLE_GFM)
+    .union(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+
+/// A heading's text as its id is made from it.
+fn heading_text(events: &[Event]) -> String {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Text(t) | Event::Code(t) => Some(t.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The headings of a Markdown file: (level 1–6, text, id), with the ids the
+/// page gives them. For the outline (ADR-0017).
+pub fn headings(src: &str) -> Vec<(u8, String, String)> {
+    let mut out = Vec::new();
+    let mut ids = std::collections::HashSet::new();
+    let mut inner: Option<(u8, Vec<Event>)> = None;
+    for ev in Parser::new_ext(src, OPTS) {
+        match ev {
+            Event::Start(Tag::Heading { level, .. }) => inner = Some((level as u8, Vec::new())),
+            Event::End(TagEnd::Heading(_)) => {
+                if let Some((level, events)) = inner.take() {
+                    let text = heading_text(&events);
+                    let id = unique_id(&slug(&text), &mut ids);
+                    out.push((level, text.trim().to_owned(), id));
+                }
+            }
+            e => {
+                if let Some((_, events)) = inner.as_mut() {
+                    events.push(e);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Front matter (`---` YAML at the top, as agents and static sites write
+/// it) as a quiet key/value block. Top-level `key: value` lines only; list
+/// items and indented lines join the key above. Not a YAML parser.
+fn front_matter(yaml: &str) -> String {
+    let mut rows: Vec<(String, String)> = Vec::new();
+    for line in yaml.lines() {
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        let top = !line.starts_with([' ', '\t', '-']);
+        if top && let Some((k, v)) = line.split_once(':') {
+            rows.push((k.trim().to_owned(), unquote(v.trim())));
+            continue;
+        }
+        let part = unquote(line.trim().trim_start_matches('-').trim());
+        match rows.last_mut() {
+            Some((_, v)) if v.is_empty() => *v = part,
+            Some((_, v)) => {
+                v.push_str(", ");
+                v.push_str(&part);
+            }
+            None => rows.push((String::new(), part)),
+        }
+    }
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut html = String::from(r#"<dl class="om-meta">"#);
+    for (k, v) in rows {
+        html.push_str(&format!("<dt>{}</dt><dd>{}</dd>", esc(&k), esc(&v)));
+    }
+    html.push_str("</dl>");
+    html
+}
+
+fn unquote(s: &str) -> String {
+    let s = s.trim();
+    for q in ['"', '\''] {
+        if s.len() >= 2 && s.starts_with(q) && s.ends_with(q) {
+            return s[1..s.len() - 1].to_owned();
+        }
+    }
+    s.to_owned()
+}
+
 pub fn markdown(src: &str, palette: &Palette) -> String {
-    let opts = Options::ENABLE_TABLES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_FOOTNOTES
-        | Options::ENABLE_GFM;
+    let opts = OPTS;
     let mut trusted = Trusted::new(src);
     let mut out: Vec<Event> = Vec::new();
     let mut code: Option<(String, String)> = None;
@@ -133,8 +219,20 @@ pub fn markdown(src: &str, palette: &Palette) -> String {
     let mut quotes: Vec<Option<BlockQuoteKind>> = Vec::new();
     let mut ids = std::collections::HashSet::new();
     let mut diagrams: Vec<(usize, String)> = Vec::new();
+    let mut meta: Option<String> = None;
 
     for ev in Parser::new_ext(src, opts) {
+        if let Some(body) = meta.as_mut() {
+            match ev {
+                Event::Text(t) => body.push_str(&t),
+                Event::End(TagEnd::MetadataBlock(_)) => {
+                    let html = front_matter(&meta.take().unwrap_or_default());
+                    out.push(Event::Html(format!("{}\n", trusted.token(html)).into()));
+                }
+                _ => {}
+            }
+            continue;
+        }
         if let Some((_, body)) = code.as_mut() {
             match ev {
                 Event::Text(t) => body.push_str(&t),
@@ -156,13 +254,7 @@ pub fn markdown(src: &str, palette: &Palette) -> String {
         if let Some((level, inner)) = heading.as_mut() {
             if let Event::End(TagEnd::Heading(_)) = ev {
                 let level = *level;
-                let text: String = inner
-                    .iter()
-                    .filter_map(|e| match e {
-                        Event::Text(t) | Event::Code(t) => Some(t.to_string()),
-                        _ => None,
-                    })
-                    .collect();
+                let text = heading_text(inner);
                 let id = unique_id(&slug(&text), &mut ids);
                 let inner = heading.take().map(|(_, e)| e).unwrap_or_default();
                 let mut html = String::new();
@@ -182,6 +274,7 @@ pub fn markdown(src: &str, palette: &Palette) -> String {
                 code = Some((lang, String::new()));
             }
             Event::Start(Tag::Heading { level, .. }) => heading = Some((level, Vec::new())),
+            Event::Start(Tag::MetadataBlock(_)) => meta = Some(String::new()),
             Event::Start(Tag::BlockQuote(kind)) => {
                 quotes.push(kind);
                 match kind {
@@ -479,6 +572,30 @@ mod tests {
 
     fn md(s: &str) -> String {
         markdown(s, &crate::theme::fallback(true))
+    }
+
+    #[test]
+    fn front_matter_is_a_quiet_block_not_a_heading() {
+        let html = md("---\ntitle: \"Scan report\"\nrepo: omamv\ntags:\n  - nightly\n  - agents\nnote: <script>x</script>\n---\n\n# Findings\n");
+        assert!(html.contains(r#"<dl class="om-meta">"#), "{html}");
+        assert!(html.contains("<dt>title</dt><dd>Scan report</dd>"), "{html}");
+        assert!(html.contains("<dt>tags</dt><dd>nightly, agents</dd>"), "{html}");
+        assert!(html.contains("&lt;script&gt;"), "{html}");
+        assert!(!html.contains("<hr"), "{html}");
+        assert_eq!(html.matches("<h").count() - html.matches("<hr").count(), 1, "{html}");
+    }
+
+    #[test]
+    fn outline_ids_match_the_page() {
+        let src = "---\na: b\n---\n# Intro\n## Same\n## Same\ntext\n### `code` *it*\n";
+        let h = headings(src);
+        let ids: Vec<&str> = h.iter().map(|x| x.2.as_str()).collect();
+        assert_eq!(ids, ["intro", "same", "same-1", "code-it"]);
+        assert_eq!(h[3].0, 3);
+        let page = md(src);
+        for id in ids {
+            assert!(page.contains(&format!("id=\"{id}\"")), "{id} in {page}");
+        }
     }
 
     #[test]

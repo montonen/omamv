@@ -361,6 +361,7 @@ dialog.om-dialog sheet { background: @sidebar_bg_color; border: 1px solid @om_mu
 .om-qo-list > row { min-height: 36px; border-radius: 8px; padding: 0 10px; background: transparent; }
 .om-qo-list > row:selected { background: alpha(@om_fg, 0.08); color: @om_bright; box-shadow: inset 2px 0 @om_accent; }
 .om-qo-path { color: alpha(@om_fg, 0.7); font-size: 0.9em; }
+.om-qo-aside { color: alpha(@om_fg, 0.7); font-size: 0.9em; font-feature-settings: "tnum"; }
 .om-qo-empty { color: alpha(@om_fg, 0.7); padding: 10px; }
 .om-dlg-title { font-weight: 700; font-size: 1.1em; color: @om_bright; }
 .om-dlg-sub { font-size: 0.86em; color: alpha(@om_fg, 0.7); }
