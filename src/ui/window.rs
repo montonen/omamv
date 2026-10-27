@@ -1075,7 +1075,7 @@ impl Win {
             if folder::is_shown(&rel) && full.is_file() {
                 self.open_file(&rel, fragment.as_deref(), None, true);
             } else {
-                self.say("omamv shows .md and .txt files only");
+                self.say(if crate::settings::get().html { "omamv shows .md, .txt and .html files" } else { "omamv shows .md and .txt files (HTML pages: Ctrl+,)" });
             }
             return;
         }
@@ -1355,7 +1355,7 @@ impl Win {
         if self.root.borrow().is_none() || was.is_none() {
             return;
         }
-        if differs(|x| format!("{}{}", x.hidden, x.gitignore)) {
+        if differs(|x| format!("{}{}{}", x.hidden, x.gitignore, x.html)) {
             self.rescan(false);
             if self.showing() == "empty" {
                 self.empty_folder();

@@ -37,12 +37,14 @@ pub struct Scan {
     pub hidden: usize,
 }
 
-/// Is this a file omamv shows? Markdown, text (ADR-0003) and HTML pages
-/// (ADR-0016).
+/// Is this a file omamv shows? Markdown and text (ADR-0003), and HTML pages
+/// when the setting is on (ADR-0016, off by default).
 pub fn is_shown(path: &Path) -> bool {
-    path.extension()
+    let text = path
+        .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| ["md", "txt", "html", "htm"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+        .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("txt"));
+    text || (is_html(path) && crate::settings::get().html)
 }
 
 /// Is this file Markdown (rendered), rather than text (shown as it is)?

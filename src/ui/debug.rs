@@ -316,7 +316,15 @@ mod imp {
         r.check("Enter opens the match", current(&w) == "docs/architecture.md", current(&w));
         r.check("the dialog closed", w.window.visible_dialog().is_none(), "");
 
-        // ---- an HTML report (ADR-0016)
+        // ---- an HTML report (ADR-0016): off by default, then on
+        let html_page = PathBuf::from("docs/report.html");
+        r.check("HTML pages are off by default: not listed", !w.scan.borrow().order.contains(&html_page), "");
+        let mut s = crate::settings::get();
+        s.html = true;
+        crate::settings::set(s);
+        super::super::apply_settings();
+        let listed = wait_until(3_000, || w.scan.borrow().order.contains(&html_page)).await;
+        r.check("turned on, they are listed", listed, "");
         nav(&w, || w.open_file(Path::new("docs/report.html"), None, None, true)).await;
         sleep(300).await;
         let h1 = js(&w, "document.querySelector('h1')?.textContent || ''").await;
@@ -333,6 +341,10 @@ mod imp {
         let page = w.web.clone();
         nav(&w, move || page.evaluate_javascript("document.querySelector('a[href*=\"README\"]').click()", None, None, gtk::gio::Cancellable::NONE, |_| {})).await;
         r.check("a link from it to Markdown opens here", current(&w) == "README.md", current(&w));
+        crate::settings::set(crate::settings::Settings::default());
+        super::super::apply_settings();
+        let unlisted = wait_until(3_000, || !w.scan.borrow().order.contains(&html_page)).await;
+        r.check("turned off again, they are gone from the tree", unlisted, "");
         nav(&w, || w.open_file(Path::new("docs/architecture.md"), None, None, true)).await;
 
         // ---- links between files
@@ -635,7 +647,9 @@ mod imp {
 
         r.note("failed", r.failed);
         r.note("took ms", t0.elapsed().as_millis());
-        let _ = std::fs::write(&report, r.lines.join("\n") + "\n");
+        if let Err(e) = std::fs::write(&report, r.lines.join("\n") + "\n") {
+            eprintln!("self-check: report not written to {}: {e}", report.display());
+        }
         if let Some(app) = w.window.application() {
             app.quit();
         }

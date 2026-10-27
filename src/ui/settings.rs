@@ -90,11 +90,21 @@ pub fn dialog() -> adw::PreferencesDialog {
         let ask = row.selected() == 1;
         change(|s| s.ask_on_open = ask);
     });
+    let html = switch(
+        "Show HTML pages",
+        "Reports and the like, as their author made them: their scripts do not run and nothing loads from the network",
+        s.html,
+    );
+    html.connect_active_notify(|row| {
+        let on = row.is_active();
+        change(|s| s.html = on);
+    });
     let folder = adw::PreferencesGroup::builder()
         .title("Folder")
-        .description("omamv shows .md, .txt and .html files")
+        .description("omamv shows .md and .txt files")
         .build();
     folder.add(&on_open);
+    folder.add(&html);
     folder.add(&hidden);
     folder.add(&gitignore);
 

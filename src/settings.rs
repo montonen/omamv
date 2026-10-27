@@ -45,6 +45,8 @@ pub struct Settings {
     pub web_pictures: bool,
     /// When a folder opens: show its first file, or ask for one by name.
     pub ask_on_open: bool,
+    /// HTML pages listed and shown, without their scripts (ADR-0016).
+    pub html: bool,
 }
 
 /// The text sizes offered, in percent.
@@ -61,6 +63,7 @@ impl Default for Settings {
             gitignore: true,
             web_pictures: true,
             ask_on_open: false,
+            html: false,
         }
     }
 }
@@ -92,6 +95,7 @@ impl Settings {
             gitignore: flag("respect_gitignore", d.gitignore),
             web_pictures: flag("web_pictures", d.web_pictures),
             ask_on_open: table.get("on_open").and_then(toml::Value::as_str).map_or(d.ask_on_open, |s| s == "open-by-name"),
+            html: flag("show_html", d.html),
         }
     }
 
@@ -99,7 +103,7 @@ impl Settings {
         format!(
             "# omamv settings (Ctrl+, in the window)\n\
              text_size = {}\npage_width = \"{}\"\ntree_side = \"{}\"\nkey_hints = {}\n\
-             show_hidden = {}\nrespect_gitignore = {}\nweb_pictures = {}\non_open = \"{}\"\n",
+             show_hidden = {}\nrespect_gitignore = {}\nweb_pictures = {}\non_open = \"{}\"\nshow_html = {}\n",
             self.text_size,
             self.width.name(),
             if self.tree_left { "left" } else { "right" },
@@ -108,6 +112,7 @@ impl Settings {
             self.gitignore,
             self.web_pictures,
             if self.ask_on_open { "open-by-name" } else { "first-file" },
+            self.html,
         )
     }
 }
@@ -160,6 +165,7 @@ mod tests {
             gitignore: false,
             web_pictures: false,
             ask_on_open: true,
+            html: true,
         };
         assert_eq!(Settings::parse(&s.to_toml()), s);
     }

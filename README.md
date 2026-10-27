@@ -21,9 +21,9 @@ already open is brought forward.
   footnotes), highlighted code, Mermaid and PlantUML diagrams in the theme's
   colours. A diagram that cannot be drawn shows as code, with the reason.
 - `.txt` files as they are.
-- `.html` pages, such as reports from scans and jobs, as their author made them:
-  their own styles and pictures, but their scripts do not run and nothing
-  loads from the network.
+- `.html` pages, such as reports from scans and jobs, when turned on in
+  Settings (off by default): as their author made them, their own styles and
+  pictures, but their scripts do not run and nothing loads from the network.
 - A folder tree, right or left, with only the folders that hold such files,
   closed but for the way to the open file. Hidden folders and anything
   `.gitignore` leaves out are skipped (both are settings).
