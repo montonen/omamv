@@ -377,6 +377,8 @@ searchbar.om-find > revealer > box { background: @window_bg_color; border-bottom
 .om-rpath { font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace; font-size: 0.95em; }
 .om-rwhen { color: alpha(@om_fg, 0.7); font-size: 0.9em; }
 .om-hint { color: alpha(@om_fg, 0.7); }
+button.om-choose { padding: 2px 8px; margin-left: -8px; }
+button.om-choose:hover .om-hint { color: @om_bright; }
 .om-foot { color: alpha(@om_fg, 0.5); }
 
 /* The banner for a removed file. */

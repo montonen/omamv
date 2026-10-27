@@ -640,10 +640,17 @@ impl Win {
         }
         let weak = self.weak();
         dialog.select_folder(Some(&self.window), gio::Cancellable::NONE, move |res| {
-            if let (Some(w), Ok(dir)) = (weak.upgrade(), res)
-                && let Some(path) = dir.path()
-            {
-                w.open_folder(&path, None);
+            let Some(w) = weak.upgrade() else { return };
+            match res {
+                Ok(dir) => match dir.path() {
+                    Some(path) => w.open_folder(&path, None),
+                    None => w.say("That folder is not on this computer's disk"),
+                },
+                Err(e) if e.matches(gtk::DialogError::Dismissed) || e.matches(gtk::DialogError::Cancelled) => {}
+                Err(e) => {
+                    eprintln!("omamv: the folder picker failed: {e}");
+                    w.say(&format!("The folder picker failed: {e}"));
+                }
             }
         });
     }
@@ -1079,6 +1086,21 @@ impl Win {
             .license_type(gtk::License::MitX11)
             .build();
         about.present(Some(&self.window));
+    }
+
+    /// A short message in the subtitle, red, until the next file opens.
+    fn say(&self, text: &str) {
+        self.gone_label.set_label(text);
+        self.gone_label.set_visible(true);
+        let weak = self.weak();
+        glib::timeout_add_local_once(Duration::from_secs(8), move || {
+            if let Some(w) = weak.upgrade()
+                && !w.gone.get()
+            {
+                w.gone_label.set_visible(false);
+                w.gone_label.set_label("gone");
+            }
+        });
     }
 
     /// Run page script, ignoring the answer.

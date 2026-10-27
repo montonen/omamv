@@ -40,7 +40,12 @@ impl Start {
             b.append(&l);
             b
         };
-        hints.append(&hint(super::keys("Ctrl+O"), "choose a folder"));
+        // The way in that a mouse can use too: the window's own action.
+        let choose = gtk::Button::builder().action_name("win.open-folder").halign(gtk::Align::Start).build();
+        choose.add_css_class("flat");
+        choose.add_css_class("om-choose");
+        choose.set_child(Some(&hint(super::keys("Ctrl+O"), "choose a folder")));
+        hints.append(&choose);
         let jk = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         for k in ["j", "k", "Enter"] {
             jk.append(&super::kbd(k));
