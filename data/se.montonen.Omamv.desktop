@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Omamv
+GenericName=Markdown Viewer
+Comment=Read a folder of Markdown, rendered
+Exec=omamv %F
+Icon=se.montonen.Omamv
+Terminal=false
+Categories=Utility;Viewer;TextTools;
+MimeType=text/markdown;text/plain;inode/directory;
+Keywords=markdown;md;viewer;readme;docs;notes;
+StartupNotify=true
+StartupWMClass=se.montonen.Omamv

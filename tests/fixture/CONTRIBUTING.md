@@ -1,0 +1,3 @@
+# Contributing
+
+omamv only reads.

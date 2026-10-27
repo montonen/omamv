@@ -1,0 +1,28 @@
+[package]
+name = "omamv"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Omarchy Markdown Viewer: a read-only, keyboard-first viewer for a folder of Markdown"
+license = "MIT"
+readme = "README.md"
+# Installed from a clone with `scripts/install.sh`; never a crates.io package.
+publish = false
+
+[dependencies]
+adw = { version = "0.9", package = "libadwaita", features = ["v1_5"] }
+ammonia = "4"
+async-channel = "2"
+base64 = "0.22"
+gtk = { version = "0.11", package = "gtk4", features = ["v4_12"] }
+ignore = "0.4"
+notify = "8"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy", "html"] }
+toml = "0.9"
+webkit6 = { version = "0.6", features = ["v2_48"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

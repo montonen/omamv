@@ -1,0 +1,99 @@
+/* omamv's page, the Quiet page design (ADR-0011). Colours come from the
+   variables omamv writes from the Omarchy palette (theme::page_vars). */
+* { box-sizing: border-box; }
+html { background: var(--bg); color: var(--fg); font: 16px/1.55 "Adwaita Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+body { margin: 0; }
+::selection { background: var(--accent); color: var(--bg); }
+
+.page { max-width: 704px; margin: 0 auto; padding: 22px 32px 40vh; overflow-wrap: break-word; }
+body.gone .page { opacity: .6; }
+
+h1, h2, h3, h4, h5, h6 { color: var(--fg-bright); text-wrap: balance; scroll-margin-top: 16px; }
+h1 { font-size: 29px; line-height: 1.2; font-weight: 700; margin: 0 0 12px; letter-spacing: -.01em; }
+h2 { font-size: 21px; line-height: 1.25; font-weight: 600; margin: 30px 0 10px; }
+h3 { font-size: 17px; line-height: 1.3; font-weight: 600; margin: 24px 0 8px; }
+h4, h5, h6 { font-size: 16px; line-height: 1.35; font-weight: 600; margin: 20px 0 6px; }
+h6 { color: var(--fg-70); }
+.page > :first-child { margin-top: 0; }
+p { margin: 0 0 14px; }
+a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--accent-50); text-underline-offset: 2px; }
+a:hover, a:focus-visible { text-decoration-color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+strong { color: var(--fg-bright); font-weight: 650; }
+hr { border: 0; border-top: 1px solid var(--muted-60); margin: 28px 0; }
+img { max-width: 100%; height: auto; }
+ul, ol { padding-left: 1.5em; margin: 0 0 14px; }
+li { margin: 0 0 3px; }
+li > ul, li > ol { margin: 3px 0 0; }
+li > p { margin: 0 0 6px; }
+blockquote { margin: 0 0 14px; padding: 2px 0 2px 16px; border-left: 3px solid var(--muted); color: var(--fg-70); }
+blockquote > :last-child { margin-bottom: 0; }
+
+code, kbd, samp { font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace; }
+:not(pre) > code { font-size: .875em; background: var(--fg-08); padding: 1px 5px; border-radius: 4px; color: var(--fg-bright); }
+kbd { font-size: 12.5px; color: var(--fg); border: 1px solid var(--muted); border-radius: 4px; padding: 1px 6px; background: var(--bg); vertical-align: 1px; }
+pre { background: var(--bg-lighter); border: 1px solid var(--muted-60); border-radius: 8px; padding: 10px 16px; margin: 0 0 14px;
+  overflow-x: auto; font: 13.5px/1.5 "JetBrainsMono Nerd Font", "JetBrains Mono", monospace; color: var(--fg); tab-size: 4; }
+pre code { background: none; padding: 0; font-size: inherit; color: inherit; }
+pre.plain { background: none; border: 0; padding: 0; white-space: pre-wrap; font-size: 14px; line-height: 1.55; }
+
+/* Code, by the palette. */
+.sy-comment { color: var(--fg-dark); font-style: italic; }
+.sy-keyword, .sy-storage { color: var(--magenta); }
+.sy-string { color: var(--green); }
+.sy-constant { color: var(--orange); }
+.sy-entity.sy-name.sy-function, .sy-support.sy-function, .sy-variable.sy-function { color: var(--blue); }
+.sy-entity.sy-name.sy-type, .sy-support.sy-type, .sy-storage.sy-type, .sy-entity.sy-name.sy-class { color: var(--cyan); }
+.sy-entity.sy-name.sy-tag { color: var(--red); }
+.sy-entity.sy-other.sy-attribute-name { color: var(--yellow); }
+.sy-keyword.sy-operator, .sy-punctuation { color: var(--fg-70); }
+.sy-markup.sy-heading { color: var(--fg-bright); font-weight: 600; }
+.sy-markup.sy-inserted { color: var(--green); }
+.sy-markup.sy-deleted { color: var(--red); }
+
+/* Tables: rules between rows only. */
+table { border-collapse: collapse; margin: 0 0 14px; font-size: 15px; display: block; overflow-x: auto; max-width: 100%; }
+th { text-align: left; font-weight: 600; color: var(--fg-bright); padding: 5px 16px 6px 0; border-bottom: 1px solid var(--muted); }
+td { padding: 5px 16px 6px 0; border-bottom: 1px solid var(--muted-60); vertical-align: top; }
+
+/* Task lists. */
+li:has(> .cb), li:has(> p > .cb) { list-style: none; margin-left: -1.5em; display: flex; align-items: flex-start; gap: 10px; }
+li:has(> p > .cb) > p { margin: 0; }
+.cb { flex: none; width: 16px; height: 16px; border: 1.5px solid var(--muted); border-radius: 4px; margin-top: 4px;
+  display: inline-flex; align-items: center; justify-content: center; vertical-align: -2px; }
+.cb.on { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+
+/* GitHub alerts. */
+.alert { border-left: 3px solid var(--accent); padding: 2px 0 2px 16px; margin: 0 0 16px; }
+.alert-t { display: flex; align-items: center; gap: 8px; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
+.alert > p:last-child { margin-bottom: 0; }
+.alert.tip { border-color: var(--green); } .alert.tip .alert-t { color: var(--green); }
+.alert.important { border-color: var(--magenta); } .alert.important .alert-t { color: var(--magenta); }
+.alert.warning { border-color: var(--yellow); } .alert.warning .alert-t { color: var(--yellow); }
+.alert.caution { border-color: var(--red); } .alert.caution .alert-t { color: var(--red); }
+
+/* Footnotes. */
+.footnote-definition { font-size: 14px; color: var(--fg-70); display: flex; gap: 8px; }
+.footnote-definition p { margin: 0; }
+sup.footnote-reference a { text-decoration: none; }
+
+details { margin: 0 0 14px; }
+summary { cursor: pointer; color: var(--fg-bright); }
+
+/* Diagrams. */
+figure.diagram { margin: 4px 0 16px; display: flex; justify-content: center; overflow-x: auto; }
+figure.diagram svg, figure.diagram img { max-width: 100%; height: auto; }
+pre.mermaid { color: transparent; min-height: 60px; } /* the source, until it is drawn */
+figure.mermaid-drawn .edgeLabel, figure.mermaid-drawn .edgeLabel p, figure.mermaid-drawn .labelBkg { background: var(--bg) !important; background-color: var(--bg) !important; color: var(--fg-70) !important; }
+figure.mermaid-drawn .edgeLabel rect { fill: var(--bg) !important; opacity: 1 !important; }
+pre.diagram-failed { color: var(--fg); }
+pre.diagram-failed::before { content: "Diagram not drawn: " attr(data-error); display: block; color: var(--red);
+  font: 13px/1.4 "Adwaita Sans", system-ui, sans-serif; margin-bottom: 8px; white-space: normal; }
+
+/* Find. */
+mark.om-find { background: var(--fg-22); color: inherit; border-radius: 3px; padding: 0 1px; }
+mark.om-find.cur { background: var(--accent); color: var(--bg); }
+mark { background: var(--fg-22); color: inherit; border-radius: 3px; }
+
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: auto; } }
