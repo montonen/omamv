@@ -80,10 +80,21 @@ pub fn dialog() -> adw::PreferencesDialog {
         let on = row.is_active();
         change(|s| s.gitignore = on);
     });
+    let on_open = combo(
+        "When a folder opens",
+        "A file given on the command line always opens",
+        &["Show its first file", "Open a file by name"],
+        u32::from(s.ask_on_open),
+    );
+    on_open.connect_selected_notify(|row| {
+        let ask = row.selected() == 1;
+        change(|s| s.ask_on_open = ask);
+    });
     let folder = adw::PreferencesGroup::builder()
         .title("Folder")
-        .description("omamv shows .md and .txt files")
+        .description("omamv shows .md, .txt and .html files")
         .build();
+    folder.add(&on_open);
     folder.add(&hidden);
     folder.add(&gitignore);
 

@@ -904,13 +904,17 @@ impl Win {
                 w.set_chrome(!empty);
             }
             let nothing_open = w.current.borrow().is_none();
-            let asked = w.pending_open.borrow_mut().take();
-            let pick = asked
-                .filter(|f| scan.order.contains(f))
-                .or_else(|| if first || nothing_open { folder::first_file(&scan) } else { None });
+            let asked = w.pending_open.borrow_mut().take().filter(|f| scan.order.contains(f));
+            // "Open a file by name" (ADR-0014): no file of omamv's choosing,
+            // now or on a later walk; a file asked for still opens.
+            let by_name = crate::settings::get().ask_on_open;
+            let ask_now = first && asked.is_none() && by_name && !empty;
+            let pick = asked.or_else(|| if (first || nothing_open) && !by_name { folder::first_file(&scan) } else { None });
             trace!("pick {pick:?}");
             *w.scan.borrow_mut() = scan;
-            if let Some(f) = pick {
+            if ask_now {
+                w.pick_a_file();
+            } else if let Some(f) = pick {
                 w.open_file(&f, None, None, true);
                 w.web.grab_focus();
             } else if empty {
@@ -921,6 +925,17 @@ impl Win {
             }
             w.update_status();
         });
+    }
+
+    /// A clean page and quick open: the reader names the file.
+    fn pick_a_file(&self) {
+        trace!("asking for a file by name");
+        let body = r#"<div class="om-pick"><p>Open a file by name: <kbd>Ctrl</kbd>+<kbd>P</kbd></p><p>or pick one in the tree.</p></div>"#;
+        self.web.load_html(&crate::render::wrap("omamv", body, &scheme::palette()), None);
+        self.title.set_label(&self.root().map(|r| folder::file_name(&r)).unwrap_or_default());
+        self.window.set_title(Some("omamv"));
+        self.update_status();
+        self.quick_open();
     }
 
     fn empty_folder(&self) {

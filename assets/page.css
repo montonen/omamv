@@ -97,3 +97,7 @@ mark.om-find.cur { background: var(--accent); color: var(--bg); }
 mark { background: var(--fg-22); color: inherit; border-radius: 3px; }
 
 @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: auto; } }
+
+/* A folder opened without a file: the reader names one (ADR-0014). */
+.om-pick { margin-top: 30vh; text-align: center; color: var(--fg-70); }
+.om-pick p { margin: 0 0 6px; }

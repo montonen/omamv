@@ -43,6 +43,8 @@ pub struct Settings {
     pub hidden: bool,
     pub gitignore: bool,
     pub web_pictures: bool,
+    /// When a folder opens: show its first file, or ask for one by name.
+    pub ask_on_open: bool,
 }
 
 /// The text sizes offered, in percent.
@@ -50,7 +52,16 @@ pub const TEXT_SIZES: [u32; 6] = [80, 90, 100, 110, 125, 150];
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { text_size: 100, width: Width::Narrow, tree_left: false, key_hints: true, hidden: false, gitignore: true, web_pictures: true }
+        Settings {
+            text_size: 100,
+            width: Width::Narrow,
+            tree_left: false,
+            key_hints: true,
+            hidden: false,
+            gitignore: true,
+            web_pictures: true,
+            ask_on_open: false,
+        }
     }
 }
 
@@ -80,6 +91,7 @@ impl Settings {
             hidden: flag("show_hidden", d.hidden),
             gitignore: flag("respect_gitignore", d.gitignore),
             web_pictures: flag("web_pictures", d.web_pictures),
+            ask_on_open: table.get("on_open").and_then(toml::Value::as_str).map_or(d.ask_on_open, |s| s == "open-by-name"),
         }
     }
 
@@ -87,7 +99,7 @@ impl Settings {
         format!(
             "# omamv settings (Ctrl+, in the window)\n\
              text_size = {}\npage_width = \"{}\"\ntree_side = \"{}\"\nkey_hints = {}\n\
-             show_hidden = {}\nrespect_gitignore = {}\nweb_pictures = {}\n",
+             show_hidden = {}\nrespect_gitignore = {}\nweb_pictures = {}\non_open = \"{}\"\n",
             self.text_size,
             self.width.name(),
             if self.tree_left { "left" } else { "right" },
@@ -95,6 +107,7 @@ impl Settings {
             self.hidden,
             self.gitignore,
             self.web_pictures,
+            if self.ask_on_open { "open-by-name" } else { "first-file" },
         )
     }
 }
@@ -138,7 +151,16 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let s = Settings { text_size: 125, width: Width::Wide, tree_left: true, key_hints: false, hidden: true, gitignore: false, web_pictures: false };
+        let s = Settings {
+            text_size: 125,
+            width: Width::Wide,
+            tree_left: true,
+            key_hints: false,
+            hidden: true,
+            gitignore: false,
+            web_pictures: false,
+            ask_on_open: true,
+        };
         assert_eq!(Settings::parse(&s.to_toml()), s);
     }
 

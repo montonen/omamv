@@ -55,6 +55,9 @@ Press `?` in the window for all of them.
 The status bar shows the keys that matter where the keyboard is, and, when a
 folder opens, how fast it was read and drawn.
 
+A folder opens on its README (then an index, then its first file), or, if
+Settings say so, on quick open with nothing shown until you pick.
+
 ## Install
 
 Arch / Omarchy:

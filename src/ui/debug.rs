@@ -591,6 +591,24 @@ mod imp {
         crate::settings::set(crate::settings::Settings::default());
         super::super::apply_settings();
 
+        // ---- "Open a file by name" when a folder opens (ADR-0014)
+        let mut s = crate::settings::get();
+        s.ask_on_open = true;
+        crate::settings::set(s);
+        w.open_folder(&root.join("docs"), None);
+        let asked = wait_until(4_000, || w.keyboard_mode() == Mode::QuickOpen).await;
+        r.check("a folder can open on quick open instead of a file", asked && w.current.borrow().is_none(), format!("{:?} {}", w.keyboard_mode(), current(&w)));
+        if let Some(q) = w.quick.borrow().clone() {
+            q.entry.emit_by_name::<()>("stop-search", &[]);
+        }
+        sleep(300).await;
+        r.check("Esc leaves the clean page, no file of omamv's choosing", w.current.borrow().is_none() && w.window.visible_dialog().is_none(), current(&w));
+        w.open_folder(&root.join("docs/adr"), Some(PathBuf::from("0001-open-a-folder.md")));
+        let named = wait_until(4_000, || current(&w) == "0001-open-a-folder.md").await;
+        r.check("a file asked for still opens", named && w.window.visible_dialog().is_none(), current(&w));
+        crate::settings::set(crate::settings::Settings::default());
+        super::super::apply_settings();
+
         // ---- a folder with nothing to show (ADR-0012)
         w.open_folder(&root.join("src"), None);
         let said = wait_until(3_000, || w.showing() == "empty").await;
