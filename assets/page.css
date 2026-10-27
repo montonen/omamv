@@ -6,7 +6,7 @@ html { background: var(--bg); color: var(--fg); font: 16px/1.55 "Adwaita Sans", 
 body { margin: 0; }
 ::selection { background: var(--accent); color: var(--bg); }
 
-.page { max-width: 704px; margin: 0 auto; padding: 22px 32px 40vh; overflow-wrap: break-word; }
+.page { margin: 0 auto; padding: 22px 32px 40vh; overflow-wrap: break-word; }
 body.gone .page { opacity: .6; }
 
 h1, h2, h3, h4, h5, h6 { color: var(--fg-bright); text-wrap: balance; scroll-margin-top: 16px; }

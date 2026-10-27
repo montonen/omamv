@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{gio, glib};
+use gtk::{gdk, gio, glib};
 
 use crate::folder::{self, Dir, Scan};
 
@@ -28,7 +28,11 @@ pub struct Tree {
     count: gtk::Label,
     selection: gtk::SingleSelection,
     model: RefCell<Option<gtk::TreeListModel>>,
-    pub cursor: Cell<u32>,
+    cursor: Rc<Cell<u32>>,
+    /// The tree has the keyboard: the cursor is drawn.
+    lit: Rc<Cell<bool>>,
+    /// The rows GTK has made, to draw the cursor on the right one.
+    items: Rc<RefCell<Vec<glib::WeakRef<gtk::ListItem>>>>,
     /// A file was chosen: Enter or a click on a file row.
     on_open: RefCell<Option<Box<dyn Fn(PathBuf)>>>,
 }
@@ -54,17 +58,24 @@ pub fn node_of(item: &glib::Object) -> Option<Node> {
 impl Tree {
     pub fn new() -> Rc<Self> {
         let factory = gtk::SignalListItemFactory::new();
-        factory.connect_setup(|_, item| {
+        let cursor: Rc<Cell<u32>> = Rc::default();
+        let lit: Rc<Cell<bool>> = Rc::default();
+        let items: Rc<RefCell<Vec<glib::WeakRef<gtk::ListItem>>>> = Rc::default();
+        let made = items.clone();
+        factory.connect_setup(move |_, item| {
             let item = item.downcast_ref::<gtk::ListItem>().expect("a list item");
+            made.borrow_mut().push(item.downgrade());
             let label = gtk::Label::builder()
                 .xalign(0.0)
                 .ellipsize(gtk::pango::EllipsizeMode::Middle)
                 .build();
-            let expander = gtk::TreeExpander::builder().child(&label).indent_for_icon(true).build();
+            let expander = gtk::TreeExpander::builder().child(&label).indent_for_icon(true).hexpand(true).build();
             item.set_child(Some(&expander));
         });
-        factory.connect_bind(|_, item| {
+        let (bind_cursor, bind_lit) = (cursor.clone(), lit.clone());
+        factory.connect_bind(move |_, item| {
             let item = item.downcast_ref::<gtk::ListItem>().expect("a list item");
+            paint(item, bind_cursor.get(), bind_lit.get());
             let Some(row) = item.item().and_downcast::<gtk::TreeListRow>() else { return };
             let Some(expander) = item.child().and_downcast::<gtk::TreeExpander>() else { return };
             let Some(label) = expander.child().and_downcast::<gtk::Label>() else { return };
@@ -117,14 +128,47 @@ impl Tree {
             count,
             selection,
             model: RefCell::new(None),
-            cursor: Cell::new(0),
+            cursor,
+            lit,
+            items,
             on_open: RefCell::new(None),
         });
+        // One click opens a file, or opens or closes a folder (ADR-0013).
+        let click = gtk::GestureClick::builder().button(gdk::BUTTON_PRIMARY).build();
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = Rc::downgrade(&tree);
+        click.connect_pressed(move |gesture, n, x, y| {
+            let Some(t) = weak.upgrade() else { return };
+            let Some(pos) = t.position_at(x, y) else { return };
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            if n == 1 {
+                t.click(pos);
+            }
+        });
+        tree.list.add_controller(click);
+        // The cursor shows only while the tree has the keyboard.
+        let focus = gtk::EventControllerFocus::new();
+        let weak = Rc::downgrade(&tree);
+        focus.connect_enter(move |_| {
+            if let Some(t) = weak.upgrade() {
+                t.lit.set(true);
+                t.repaint();
+            }
+        });
+        let weak = Rc::downgrade(&tree);
+        focus.connect_leave(move |_| {
+            if let Some(t) = weak.upgrade() {
+                t.lit.set(false);
+                t.repaint();
+            }
+        });
+        tree.widget.add_controller(focus);
         let weak = Rc::downgrade(&tree);
         tree.list.connect_activate(move |_, pos| {
             if let Some(t) = weak.upgrade() {
                 t.cursor.set(pos);
                 t.activate(pos);
+                t.repaint();
             }
         });
         tree
@@ -240,6 +284,68 @@ impl Tree {
             self.list.grab_focus();
         }
         self.list.scroll_to(pos, gtk::ListScrollFlags::FOCUS, None);
+        self.repaint();
+    }
+
+    /// One click on a row: a file opens, a folder opens or closes.
+    pub fn click(&self, pos: u32) {
+        self.cursor.set(pos);
+        self.activate(pos);
+        self.repaint();
+    }
+
+    /// The row showing `name` (for checks).
+    pub fn position_of(&self, name: &str) -> Option<u32> {
+        let mut i = 0;
+        while let Some(row) = self.row(i) {
+            let shown = match node_of(row.upcast_ref()) {
+                Some(Node::Dir(d)) => d.name.clone(),
+                Some(Node::File(f)) => folder::file_name(&f),
+                None => String::new(),
+            };
+            if shown == name {
+                return Some(i);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Where the cursor is.
+    pub fn cursor(&self) -> u32 {
+        self.cursor.get()
+    }
+
+    /// The name on the row the cursor is drawn on, if one is (for checks).
+    pub fn cursor_label(&self) -> Option<String> {
+        self.items.borrow().iter().filter_map(|w| w.upgrade()).find_map(|item| {
+            let row = item.child()?;
+            if !row.has_css_class("om-cursor") {
+                return None;
+            }
+            let label = item.child().and_downcast::<gtk::TreeExpander>()?.child().and_downcast::<gtk::Label>()?;
+            Some(label.label().to_string())
+        })
+    }
+
+    fn repaint(&self) {
+        let (at, lit) = (self.cursor.get(), self.lit.get());
+        self.items.borrow_mut().retain(|w| {
+            let Some(item) = w.upgrade() else { return false };
+            paint(&item, at, lit);
+            true
+        });
+    }
+
+    /// The row under a point of the list.
+    fn position_at(&self, x: f64, y: f64) -> Option<u32> {
+        let mut w = self.list.pick(x, y, gtk::PickFlags::DEFAULT)?;
+        loop {
+            if let Some(exp) = w.downcast_ref::<gtk::TreeExpander>() {
+                return exp.list_row().map(|r| r.position());
+            }
+            w = w.parent()?;
+        }
     }
 
     /// A key while the tree has the keyboard. True if it was the tree's.
@@ -279,6 +385,7 @@ impl Tree {
             "Return" | "KP_Enter" | "space" => self.activate(at),
             _ => return false,
         }
+        self.repaint();
         true
     }
 
@@ -296,5 +403,17 @@ impl Tree {
             }
             None => {}
         }
+    }
+}
+
+/// Draw the cursor on a row, or take it off.
+/// On omamv's own widget in the row: GTK's row widget must not be touched
+/// while GTK binds it (that crashed in set_model).
+fn paint(item: &gtk::ListItem, cursor: u32, lit: bool) {
+    let Some(row) = item.child() else { return };
+    if lit && item.position() == cursor {
+        row.add_css_class("om-cursor");
+    } else {
+        row.remove_css_class("om-cursor");
     }
 }

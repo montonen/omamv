@@ -3,7 +3,9 @@
 pub mod debug;
 mod keys;
 mod quickopen;
+mod settings;
 mod start;
+pub mod status;
 mod tree;
 pub mod window;
 
@@ -83,6 +85,13 @@ fn apply_theme(redraw: bool) {
         for w in windows() {
             w.repaint(&palette);
         }
+    }
+}
+
+/// Settings changed (ADR-0014): every window takes them at once.
+pub fn apply_settings() {
+    for w in windows() {
+        w.apply_settings();
     }
 }
 

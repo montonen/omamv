@@ -328,15 +328,18 @@ headerbar.om-header button:hover { background: alpha(@om_fg, 0.08); }
 /* Folder tree: slim, muted until it has the keyboard. */
 .om-tree { background: @sidebar_bg_color; border-left: 1px solid alpha(@om_muted, 0.6); color: alpha(@om_fg, 0.7); }
 .om-tree:focus-within { color: @om_fg; }
+.om-tree.om-tree-left { border-left: none; border-right: 1px solid alpha(@om_muted, 0.6); }
 .om-tree-head { padding: 4px 14px 10px 14px; font-size: 0.86em; }
 .om-tree-name { font-weight: 600; letter-spacing: 0.02em; color: alpha(@om_fg, 0.7); }
 .om-tree:focus-within .om-tree-name { color: @om_bright; }
 .om-tree-count { color: alpha(@om_fg, 0.5); }
 .om-tree listview { background: transparent; color: inherit; }
-.om-tree listview > row { min-height: 28px; padding: 0 12px 0 0; border-radius: 0; color: inherit; background: transparent; outline: none; }
+.om-tree listview > row { min-height: 28px; border-radius: 0; color: inherit; background: transparent; outline: none; }
 .om-tree listview > row:selected { color: @om_bright; background: alpha(@om_fg, 0.08); box-shadow: inset 2px 0 @om_accent; }
-.om-tree:focus-within listview > row:focus-visible,
-.om-tree:focus-within listview > row:focus { outline: 2px solid @om_accent; outline-offset: -2px; color: @om_bright; background: alpha(@om_fg, 0.08); }
+.om-tree listview > row:focus, .om-tree listview > row:focus-visible { outline: none; }
+.om-tree listview > row { padding: 0; }
+.om-tree treeexpander { padding-right: 12px; min-height: 28px; }
+.om-tree treeexpander.om-cursor { outline: 2px solid @om_accent; outline-offset: -2px; color: @om_bright; background: alpha(@om_fg, 0.08); }
 .om-tree .om-dir { font-weight: 500; }
 .om-tree expander { color: alpha(@om_fg, 0.5); }
 
@@ -380,6 +383,12 @@ searchbar.om-find > revealer > box { background: @window_bg_color; border-bottom
 button.om-choose { padding: 2px 8px; margin-left: -8px; }
 button.om-choose:hover .om-hint { color: @om_bright; }
 .om-foot { color: alpha(@om_fg, 0.5); }
+
+/* Status bar: the keys where the keyboard is (ADR-0013). */
+.om-status { min-height: 28px; padding: 0 14px; border-top: 1px solid alpha(@om_muted, 0.6); background: @window_bg_color; font-size: 0.82em; }
+.om-status .om-kbd { font-size: 0.92em; padding: 0 5px; }
+.om-status-label { color: alpha(@om_fg, 0.7); }
+.om-status-place { color: alpha(@om_fg, 0.7); font-feature-settings: "tnum"; }
 
 /* The banner for a removed file. */
 banner.om-banner > revealer > widget { background: @sidebar_bg_color; color: @om_bright; border-bottom: 1px solid alpha(@om_muted, 0.6); }

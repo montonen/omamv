@@ -45,15 +45,31 @@ pub fn is_markdown(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("md"))
 }
 
-pub fn scan(root: &Path) -> Scan {
+/// What a walk leaves out (ADR-0014).
+#[derive(Clone, Copy, Debug)]
+pub struct Skip {
+    pub hidden: bool,
+    pub gitignored: bool,
+}
+
+impl Default for Skip {
+    fn default() -> Self {
+        Skip { hidden: true, gitignored: true }
+    }
+}
+
+pub fn scan(root: &Path, skip: Skip) -> Scan {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut truncated = false;
     let walk = ignore::WalkBuilder::new(root)
-        .hidden(true)
-        .git_ignore(true)
-        .git_exclude(true)
-        .git_global(true)
-        .parents(true)
+        .hidden(skip.hidden)
+        .git_ignore(skip.gitignored)
+        .git_exclude(skip.gitignored)
+        .git_global(skip.gitignored)
+        .ignore(skip.gitignored)
+        .parents(skip.gitignored)
+        // .git itself is never anyone's reading.
+        .filter_entry(|e| e.file_name() != ".git")
         .follow_links(false)
         .require_git(false)
         .build();
@@ -185,7 +201,9 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, body).unwrap();
         }
-        let scan = scan(&dir);
+        let all = scan(&dir, Skip { hidden: false, gitignored: false });
+        assert_eq!(all.order.len(), 4, "hidden and ignored files too: {:?}", all.order);
+        let scan = scan(&dir, Skip::default());
         assert_eq!(scan.order, [p("notes/todo.txt"), p("README.md")]);
         assert_eq!(scan.tree.dirs.len(), 1, "src, images and the hidden and ignored folders are left out");
         assert_eq!(first_file(&scan), Some(p("README.md")));
@@ -207,7 +225,7 @@ mod probe {
     fn probe() {
         let dir = std::env::var("OMAMV_PROBE").unwrap();
         let t = std::time::Instant::now();
-        let s = super::scan(std::path::Path::new(&dir));
+        let s = super::scan(std::path::Path::new(&dir), super::Skip::default());
         eprintln!("{} files in {:?}, truncated {}: {:?}", s.order.len(), t.elapsed(), s.truncated, &s.order[..s.order.len().min(8)]);
     }
 }

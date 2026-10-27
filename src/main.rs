@@ -6,6 +6,7 @@ mod fuzzy;
 mod recent;
 mod render;
 mod scheme;
+mod settings;
 mod theme;
 mod ui;
 mod watch;

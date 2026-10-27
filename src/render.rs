@@ -28,15 +28,18 @@ pub fn page(path: &Path, text: &str, palette: &Palette) -> String {
 /// The page around a body: the content policy lets nothing run but omamv's
 /// own script, and loads nothing but omamv's own files, data, and pictures.
 pub fn wrap(title: &str, body: &str, palette: &Palette) -> String {
+    let s = crate::settings::get();
+    let web = if s.web_pictures { " https:" } else { "" };
     format!(
         r#"<!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src omamv: data: https:; style-src 'unsafe-inline' omamv:; script-src omamv:; font-src omamv:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src omamv: data:{web}; style-src 'unsafe-inline' omamv:; script-src omamv:; font-src omamv:">
 <title>{title}</title>
-<style>{vars}</style>
+<style>{vars} .page{{max-width:{width}}}</style>
 <link rel="stylesheet" href="omamv://assets/page.css">
 </head><body><main class="page">{body}</main><script src="omamv://assets/app.js"></script></body></html>"#,
         title = esc(title),
         vars = theme::page_vars(palette),
+        width = s.width.css(),
     )
 }
 

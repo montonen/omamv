@@ -18,6 +18,7 @@ use webkit6::{NavigationPolicyDecision, PolicyDecisionType, WebView};
 
 use super::quickopen::QuickOpen;
 use super::start::Start;
+use super::status::{Mode, Status};
 use super::tree::Tree;
 use crate::folder::{self, Scan};
 use crate::scheme;
@@ -90,6 +91,7 @@ pub struct Win {
     pub changed: gtk::Label,
     gone_label: gtk::Label,
     pub banner: adw::Banner,
+    pub status: Status,
     pub split: adw::OverlaySplitView,
     pub tree: Rc<Tree>,
     stack: gtk::Stack,
@@ -163,6 +165,7 @@ impl Win {
         menu.append(Some("Open Folder…"), Some("win.open-folder"));
         menu.append(Some("Recent Folders"), Some("win.recent"));
         let more = gio::Menu::new();
+        more.append(Some("Settings"), Some("win.settings"));
         more.append(Some("Keys"), Some("win.keys"));
         more.append(Some("About omamv"), Some("win.about"));
         menu.append_section(None, &more);
@@ -226,6 +229,9 @@ impl Win {
         toolbar.add_top_bar(&banner);
         toolbar.set_top_bar_style(adw::ToolbarStyle::Flat);
         toolbar.set_content(Some(&stack));
+        let status = Status::new();
+        toolbar.add_bottom_bar(&status.widget);
+        toolbar.set_bottom_bar_style(adw::ToolbarStyle::Flat);
 
         let window = adw::ApplicationWindow::builder()
             .application(app)
@@ -276,6 +282,7 @@ impl Win {
             changed,
             gone_label,
             banner,
+            status,
             split,
             tree,
             stack,
@@ -305,6 +312,7 @@ impl Win {
         *win_holder.borrow_mut() = Rc::downgrade(&win);
         super::remember(&win);
         win.wire(&ucm, &menu_button);
+        win.apply_settings();
         win.show_start();
         win
     }
@@ -472,9 +480,10 @@ impl Win {
         });
 
         // Actions for the menu.
-        let actions: [(&str, fn(&Win)); 4] = [
+        let actions: [(&str, fn(&Win)); 5] = [
             ("open-folder", Win::choose_folder),
             ("recent", Win::show_recent),
+            ("settings", Win::show_settings),
             ("keys", Win::show_keys),
             ("about", Win::show_about),
         ];
@@ -498,6 +507,32 @@ impl Win {
             if w.key(key, mods) { glib::Propagation::Stop } else { glib::Propagation::Proceed }
         });
         self.window.add_controller(keys);
+
+        // The status bar follows the keyboard.
+        let weak = self.weak();
+        self.window.connect_notify_local(Some("focus-widget"), move |_, _| {
+            if let Some(w) = weak.upgrade() {
+                w.update_status();
+            }
+        });
+        let weak = self.weak();
+        self.window.connect_notify_local(Some("visible-dialog"), move |_, _| {
+            if let Some(w) = weak.upgrade() {
+                w.update_status();
+            }
+        });
+        let weak = self.weak();
+        self.stack.connect_visible_child_name_notify(move |_| {
+            if let Some(w) = weak.upgrade() {
+                w.update_status();
+            }
+        });
+        let weak = self.weak();
+        self.findbar.connect_search_mode_enabled_notify(move |_| {
+            if let Some(w) = weak.upgrade() {
+                w.update_status();
+            }
+        });
 
         let weak = self.weak();
         self.window.connect_close_request(move |_| {
@@ -576,6 +611,10 @@ impl Win {
                 self.quick_open();
                 return true;
             }
+            (true, _, "comma") => {
+                self.show_settings();
+                return true;
+            }
             (true, _, "f") => {
                 self.open_find();
                 return true;
@@ -593,7 +632,7 @@ impl Win {
                 return true;
             }
             (true, _, "0" | "KP_0") => {
-                self.set_zoom(1.0);
+                self.set_zoom(crate::settings::get().zoom());
                 return true;
             }
             (false, true, "Left") => {
@@ -766,7 +805,9 @@ impl Win {
         let (tx, rx) = async_channel::bounded(1);
         let walk_root = root.clone();
         std::thread::spawn(move || {
-            let _ = tx.send_blocking(folder::scan(&walk_root));
+            let s = crate::settings::get();
+            let skip = folder::Skip { hidden: !s.hidden, gitignored: s.gitignore };
+            let _ = tx.send_blocking(folder::scan(&walk_root, skip));
         });
         let weak = self.weak();
         glib::spawn_future_local(async move {
@@ -845,6 +886,7 @@ impl Win {
         self.window.set_title(Some(&format!("{name} — omamv")));
         self.changed.set_visible(false);
         self.tree.mark(Some(file));
+        self.update_status();
     }
 
     fn load(&self, uri: &str) {
@@ -1053,8 +1095,9 @@ impl Win {
                 w.web.grab_focus();
             }
         });
+        // Noted first: the status bar asks which dialog it is as it appears.
+        *self.quick.borrow_mut() = Some(qo.clone());
         qo.present(&self.window);
-        *self.quick.borrow_mut() = Some(qo);
     }
 
     pub fn open_find(&self) {
@@ -1140,10 +1183,32 @@ impl Win {
     }
 
     fn set_zoom(&self, z: f64) {
-        let z = (z * 10.0).round() / 10.0;
+        let z = (z * 20.0).round() / 20.0;
         let z = z.clamp(0.5, 3.0);
         self.zoom.set(z);
         self.web.set_zoom_level(z);
+    }
+
+    pub fn show_settings(&self) {
+        super::settings::dialog().present(Some(&self.window));
+    }
+
+    /// Take the settings as they are now (ADR-0014).
+    pub fn apply_settings(&self) {
+        let s = crate::settings::get();
+        self.split.set_sidebar_position(if s.tree_left { gtk::PackType::Start } else { gtk::PackType::End });
+        if s.tree_left {
+            self.tree.widget.add_css_class("om-tree-left");
+        } else {
+            self.tree.widget.remove_css_class("om-tree-left");
+        }
+        self.tree_button.set_icon_name(if s.tree_left { "sidebar-show-symbolic" } else { "sidebar-show-right-symbolic" });
+        self.status.widget.set_visible(s.key_hints);
+        self.set_zoom(s.zoom());
+        if self.root.borrow().is_some() {
+            self.rescan(false, None);
+            self.reload_keeping_place();
+        }
     }
 
     pub fn show_keys(&self) {
@@ -1160,6 +1225,37 @@ impl Win {
             .license_type(gtk::License::MitX11)
             .build();
         about.present(Some(&self.window));
+    }
+
+    /// Where the keyboard is, for the status bar.
+    pub fn keyboard_mode(&self) -> Mode {
+        if let Some(d) = self.window.visible_dialog() {
+            let quick = self.quick.borrow().as_ref().is_some_and(|q| q.dialog == d);
+            return if quick { Mode::QuickOpen } else { Mode::Dialog };
+        }
+        match self.showing().as_str() {
+            "start" => return Mode::Start,
+            "empty" => return Mode::Empty,
+            "reading" => return Mode::Reading,
+            _ => {}
+        }
+        if self.findbar.is_search_mode() {
+            return Mode::Find;
+        }
+        if self.tree.has_focus() {
+            return Mode::Tree;
+        }
+        Mode::Page
+    }
+
+    pub fn update_status(&self) {
+        let mode = self.keyboard_mode();
+        let place = self.current.borrow().as_ref().and_then(|c| {
+            let scan = self.scan.borrow();
+            scan.order.iter().position(|f| f == c).map(|i| (i + 1, scan.order.len()))
+        });
+        let place = if matches!(mode, Mode::Page | Mode::Tree | Mode::Find) { place } else { None };
+        self.status.set(mode, place);
     }
 
     /// A short message in the subtitle, red, until the next file opens.

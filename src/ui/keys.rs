@@ -41,6 +41,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("Esc", "close find, keep the place"),
             ("Ctrl+C", "copy the selection"),
             ("?", "this overview"),
+            ("Ctrl+,", "settings"),
             ("F10", "menu"),
             ("Ctrl+W", "close the window"),
             ("Ctrl+Q", "quit"),

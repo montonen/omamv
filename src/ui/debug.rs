@@ -33,6 +33,7 @@ mod imp {
     use gtk::{gdk, glib};
     use webkit6::prelude::*;
 
+    use super::super::status::Mode;
     use super::super::window::Win;
 
     thread_local! {
@@ -163,6 +164,7 @@ mod imp {
             w.findbar.clone().upcast(),
             w.banner.clone().upcast(),
             w.tree.widget.clone().upcast(),
+            w.status.widget.clone().upcast(),
             w.start.widget.clone().upcast(),
         ] {
             part(&snapshot, &widget);
@@ -236,6 +238,8 @@ mod imp {
         let img = js(&w, "String(document.querySelector('img[alt=dot]')?.naturalWidth)").await;
         r.check("local picture shown", img == "40", &img);
         r.note("shot reading", shot(&w, &shots.join("1-reading.png")).await);
+        w.update_status();
+        r.check("status bar: page keys", w.status.mode() == Some(Mode::Page) && w.status.text().contains("Ctrl+P"), w.status.text());
 
         // ---- reading keys
         for _ in 0..6 {
@@ -275,6 +279,7 @@ mod imp {
         ctrl(&w, gdk::Key::p);
         sleep(300).await;
         r.check("Ctrl+P opens quick open", w.window.visible_dialog().is_some(), "");
+        r.check("status bar: quick open keys", w.status.mode() == Some(Mode::QuickOpen), format!("{:?}", w.status.mode()));
         let qo = w.quick.borrow().clone();
         if let Some(qo) = qo {
             let empty = qo.matches("");
@@ -304,12 +309,15 @@ mod imp {
         ctrl(&w, gdk::Key::b);
         sleep(200).await;
         r.check("Ctrl+B gives the tree the keyboard", w.tree.has_focus(), "");
+        r.check("status bar: tree keys", w.status.mode() == Some(Mode::Tree) && w.status.text().contains("h l"), w.status.text());
+        r.check("the tree's cursor is drawn on the open file", w.tree.cursor_label().as_deref() == Some(current(&w).rsplit('/').next().unwrap_or("")), format!("{:?}", w.tree.cursor_label()));
         r.note("shot tree", shot(&w, &shots.join("3-tree.png")).await);
         press(&w, gdk::Key::Home);
         press(&w, gdk::Key::j);
         sleep(50).await;
-        let row = w.tree.cursor.get();
+        let row = w.tree.cursor();
         r.check("j moves in the tree", row == 1, row);
+        r.check("and the cursor is drawn there", w.tree.cursor_label().as_deref() == Some("adr"), format!("{:?}", w.tree.cursor_label()));
         press(&w, gdk::Key::k);
         press(&w, gdk::Key::h);
         sleep(50).await;
@@ -333,6 +341,25 @@ mod imp {
         press(&w, gdk::Key::Escape);
         sleep(100).await;
         r.check("Esc in the tree returns to the page", !w.tree.has_focus() && w.split.shows_sidebar(), "");
+        // One click on a file opens it (ADR-0013).
+        let row = w.tree.position_of("CONTRIBUTING.md");
+        nav(&w, || {
+            if let Some(row) = row {
+                w.tree.click(row);
+            }
+        })
+        .await;
+        r.check("one click on a file opens it", current(&w) == "CONTRIBUTING.md", current(&w));
+        let notes = w.tree.position_of("notes");
+        let open_before = notes.and_then(|p| w.tree.row(p)).is_some_and(|r| r.is_expanded());
+        if let Some(p) = notes {
+            w.tree.click(p);
+        }
+        let open_after = notes.and_then(|p| w.tree.row(p)).is_some_and(|r| r.is_expanded());
+        r.check("one click on a folder opens or closes it", open_before != open_after, format!("{open_before} -> {open_after}"));
+        if let Some(p) = notes {
+            w.tree.click(p);
+        }
         w.open_file(Path::new("README.md"), None, None, true);
         ready(&w).await;
 
@@ -340,6 +367,7 @@ mod imp {
         ctrl(&w, gdk::Key::f);
         w.find_entry.set_text("folder");
         sleep(400).await;
+        r.check("status bar: find keys", w.status.mode() == Some(Mode::Find), format!("{:?}", w.status.mode()));
         let count = w.find_count.label().to_string();
         r.check("find counts matches", count.ends_with(" of 4") || count.contains(" of "), &count);
         r.note("shot find", shot(&w, &shots.join("4-find.png")).await);
@@ -366,6 +394,7 @@ mod imp {
         press(&w, gdk::Key::question);
         sleep(300).await;
         r.check("? shows the keys", w.window.visible_dialog().is_some(), "");
+        r.check("status bar: Esc closes it", w.status.mode() == Some(Mode::Dialog), format!("{:?}", w.status.mode()));
         r.note("shot keys", shot(&w, &shots.join("5-keys.png")).await);
         if let Some(d) = w.window.visible_dialog() {
             d.close();
@@ -433,6 +462,43 @@ mod imp {
             r.check("the page takes the new palette", bg == "#eff1f5", &bg);
             r.note("shot light", shot(&w, &shots.join("7-light.png")).await);
         }
+
+        // ---- settings (ADR-0014)
+        ctrl(&w, gdk::Key::comma);
+        sleep(300).await;
+        r.check("Ctrl+, opens settings", w.window.visible_dialog().is_some_and(|d| d.is::<adw::PreferencesDialog>()), "");
+        r.note("shot settings", shot(&w, &shots.join("8-settings.png")).await);
+        if let Some(d) = w.window.visible_dialog() {
+            d.close();
+        }
+        sleep(200).await;
+        let mut s = crate::settings::get();
+        s.tree_left = true;
+        s.key_hints = false;
+        s.text_size = 125;
+        s.width = crate::settings::Width::Wide;
+        s.web_pictures = false;
+        let loads = w.loads.get();
+        crate::settings::set(s);
+        super::super::apply_settings();
+        r.check("tree on the left", w.split.sidebar_position() == gtk::PackType::Start, "");
+        r.check("key hints off hides the status bar", !w.status.widget.is_visible(), "");
+        r.check("text size sets the zoom", (w.web.zoom_level() - 1.25).abs() < 0.01, w.web.zoom_level());
+        wait_until(5_000, || w.loads.get() > loads).await;
+        ready(&w).await;
+        let width = js(&w, "getComputedStyle(document.querySelector('.page')).maxWidth").await;
+        r.check("page width wide", width == "944px", &width);
+        let csp = js(&w, "document.querySelector('meta[http-equiv]').content").await;
+        r.check("web pictures off leaves https out", !csp.contains("https:"), &csp);
+        let saved = std::fs::read_to_string(
+            std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_default().join("omamv/settings.toml"),
+        )
+        .unwrap_or_default();
+        r.check("settings are saved", saved.contains("tree_side = \"left\"") && saved.contains("text_size = 125"), saved.lines().count());
+        crate::settings::set(crate::settings::Settings::default());
+        super::super::apply_settings();
+        ready(&w).await;
+        r.check("defaults back", w.split.sidebar_position() == gtk::PackType::End && w.status.widget.is_visible(), "");
 
         // ---- a folder with nothing to show (ADR-0012)
         w.open_folder(&root.join("src"), None);
