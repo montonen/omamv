@@ -1,4 +1,4 @@
-# omamdv
+# omamv
 
 Omarchy Markdown Viewer: a desktop viewer for Markdown files with the Omarchy
 look and feel, following the active Omarchy theme.
