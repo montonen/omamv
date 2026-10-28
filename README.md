@@ -48,6 +48,7 @@ Press `?` in the window for all of them.
 | `o` | outline: go to a heading |
 | `y` | copy the file's path |
 | `e` | open the file in your editor: Omarchy's by default, or the command set in Settings |
+| `Ctrl+Shift+S` | the whole page as one tall picture: saved under `~/Pictures/omamv` and copied |
 | `]` `[` or `J` `K` | next / previous file |
 | `Ctrl+B` | folder tree: focus, or hide (`j k h l`, arrows, `Enter`, `Esc` inside) |
 | `<` `>` | folder tree narrower / wider (or drag its edge) |

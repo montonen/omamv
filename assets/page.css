@@ -110,3 +110,6 @@ dl.om-meta dd { margin: 0; overflow-wrap: anywhere; }
 
 /* A [[wikilink]] to nothing in this folder (ADR-0018): its text, dimmed. */
 .om-wiki-missing { color: var(--fg-70); text-decoration: underline dotted var(--muted); text-underline-offset: 2px; cursor: help; }
+
+/* The page as a picture (ADR-0023): no room left for scrolling past the end. */
+body.om-shot .page { padding-bottom: 32px; }

@@ -29,6 +29,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+P", "open a file, newest first"),
             ("y", "copy the file's path"),
             ("e", "open the file in your editor"),
+            ("Ctrl+Shift+S", "the whole page as a picture"),
             ("] / [", "next / previous file"),
             ("J / K", "next / previous file"),
             ("Ctrl+B", "folder tree: focus, or hide"),
@@ -179,7 +180,7 @@ mod tests {
         assert!(has(&ctrl, "+ − 0"), "{ctrl:?}");
         assert!(ctrl.iter().any(|(k, a)| k == "O" && a == "open a folder") && ctrl.iter().all(|(_, a)| a != "recent folders"), "{ctrl:?}");
         let ctrl_shift = held(&["Ctrl", "Shift"]);
-        assert_eq!(ctrl_shift, [("O".to_owned(), "recent folders".to_owned())]);
+        assert_eq!(ctrl_shift, [("S".to_owned(), "the whole page as a picture".to_owned()), ("O".to_owned(), "recent folders".to_owned())]);
         let alt = held(&["Alt"]);
         assert_eq!(alt, [("← →".to_owned(), "back / forward".to_owned())]);
     }

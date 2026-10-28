@@ -226,6 +226,8 @@ mod imp {
         // Without PlantUML (CI's container) its diagrams say so instead; that is not this check.
         let failed = js(&w, "String([...document.querySelectorAll('pre.diagram-failed')].filter(p => !(p.dataset.error || '').includes('not installed')).length)").await;
         r.check("a broken diagram shows as code", failed == "1", &failed);
+        let leftover = js(&w, "String(document.body.innerText.includes('Syntax error in text'))").await;
+        r.check("  and Mermaid leaves no error drawing at the end of the page", leftover == "false", &leftover);
         let missing = js(&w, "String(document.querySelectorAll('pre.diagram-failed[data-error*=\"not installed\"]').length)").await;
         if missing != "0" {
             r.note("PlantUML not installed here; its diagrams say so", &missing);
@@ -268,7 +270,7 @@ mod imp {
         r.note("shot ctrl held", shot(&w, &shots.join("1b-ctrl-held.png")).await);
         r.check("  more than fits: whole ones shown, the rest counted", w.status.left_out() > 0, w.status.left_out());
         hold(gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK);
-        r.check("  Shift added: Ctrl+Shift's", w.status.held().as_deref() == Some("Ctrl+Shift") && w.status.text() == "O recent folders", w.status.text());
+        r.check("  Shift added: Ctrl+Shift's", w.status.held().as_deref() == Some("Ctrl+Shift") && w.status.text().contains("O recent folders") && w.status.text().contains("S the whole page as a picture"), w.status.text());
         hold(gdk::ModifierType::empty());
         r.check("  let go: the page keys again", w.status.held().is_none() && w.status.text().contains("j k ↓ ↑ scroll"), w.status.text());
         let mut s = crate::settings::get();
@@ -402,6 +404,29 @@ mod imp {
         r.check("  put back: clean again", shown(|t| (t.ends_with(" ago") || t.ends_with(" just now")) && !t.contains("modified") && !t.contains("staged")).await, label());
         r.check("  and omamv wrote nothing into the repository", std::fs::read_to_string(&arch).unwrap_or_default() == text, "");
         ready(&w).await;
+
+        // ---- the page as one tall picture (ADR-0023)
+        let pictures = report.parent().map(|d| d.join("pictures/omamv")).unwrap_or_default();
+        nav(&w, || w.open_file(Path::new("README.md"), None, None, true)).await;
+        sleep(800).await;
+        key(&w, gdk::Key::S, gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK);
+        let saved = wait_until(5_000, || std::fs::read_dir(&pictures).is_ok_and(|mut d| d.next().is_some())).await;
+        let png = std::fs::read_dir(&pictures).ok().and_then(|mut d| d.next()).and_then(|e| e.ok()).map(|e| e.path());
+        let size = png.as_ref().and_then(|p| std::fs::read(p).ok()).filter(|b| b.len() > 24 && b.starts_with(b"\x89PNG")).map(|b| {
+            let n = |i: usize| u32::from_be_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
+            (n(16), n(20))
+        });
+        let page_h = js(&w, "String(document.documentElement.scrollHeight)").await.parse::<u32>().unwrap_or(0);
+        r.check(
+            "Ctrl+Shift+S saves the whole page as one picture, taller than the window",
+            // The page less the room for scrolling past its end (40 % of the window).
+            saved && size.is_some_and(|(pw, ph)| ph > w.web.height() as u32 && ph < page_h && ph + (w.web.height() as u32 * 2 / 5) >= page_h && pw <= w.web.width() as u32 + 4),
+            format!("{:?} {size:?} page {page_h}", png.as_ref().and_then(|p| p.file_name())),
+        );
+        let after = js(&w, "String(document.body.classList.contains('om-shot') + ' ' + document.documentElement.scrollHeight)").await;
+        r.check("  the page is as it was afterwards", after == format!("false {page_h}"), &after);
+        r.check("  and says where it went", w.status.shown_note().is_some_and(|n| n.starts_with("page saved as ") && n.contains("copied")), format!("{:?}", w.status.shown_note()));
+        nav(&w, || w.open_file(Path::new("docs/architecture.md"), None, None, true)).await;
 
         // e: a stand-in editor that writes down what it was given, outside the folder.
         let handed = report.with_extension("edited");

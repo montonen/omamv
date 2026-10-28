@@ -86,8 +86,9 @@ async function drawMermaid(blocks) {
       pre.dataset.error = String((e && e.message) || e).split("\n")[0];
     }
   }
-  // A failed render leaves its scratch element at the end of the body.
-  document.querySelectorAll("body > [id^='domomamv-mermaid'], body > [id^='omamv-mermaid'], body > [id^='domomamv']").forEach((n) => n.remove());
+  // A failed render leaves its scratch element ("d" + the id, and an "i"
+  // frame) at the end of the body, with Mermaid's own error drawing in it.
+  document.querySelectorAll("body > [id^='domamv-mermaid'], body > [id^='iomamv-mermaid'], body > [id^='omamv-mermaid']").forEach((n) => n.remove());
 }
 
 // ---- where the reader is ----

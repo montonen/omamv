@@ -60,6 +60,8 @@ broadway=$!
 trap 'kill $broadway 2>/dev/null || true; [ -n "${KEEP:-}" ] || true' EXIT
 sleep 0.5
 
+# Pictures the page saves (Ctrl+Shift+S) land here, never in the real ~/Pictures.
+printf 'XDG_PICTURES_DIR="%s"\n' "$work/pictures" > "$work/config/user-dirs.dirs"
 mkdir -p "$work/config/gtk-4.0"
 printf '[Settings]\ngtk-enable-animations=false\n' > "$work/config/gtk-4.0/settings.ini"
 

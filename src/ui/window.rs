@@ -805,6 +805,10 @@ impl Win {
                 self.open_find();
                 return true;
             }
+            (true, _, "S") => {
+                self.save_picture();
+                return true;
+            }
             (true, _, "b") => {
                 self.toggle_tree();
                 return true;
@@ -1575,6 +1579,49 @@ impl Win {
             }
         });
         qo.present(&self.window);
+    }
+
+    /// Ctrl+Shift+S: the whole page as one tall picture (ADR-0023), drawn by
+    /// WebKit in one go, so nothing is stitched and the tree is not in it.
+    /// Saved under Pictures/omamv and put on the clipboard.
+    pub fn save_picture(&self) {
+        let Some(file) = self.current.borrow().clone() else { return };
+        let dir = glib::user_special_dir(glib::UserDirectory::Pictures)
+            .unwrap_or_else(|| glib::home_dir().join("Pictures"))
+            .join("omamv");
+        let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "page".into());
+        let when = glib::DateTime::now_local().ok().and_then(|t| t.format("%Y-%m-%d %H.%M.%S").ok()).map(|s| s.to_string()).unwrap_or_default();
+        let path = dir.join(format!("{stem} {when}.png"));
+        let weak = self.weak();
+        // The room for scrolling past the end is left out of the picture,
+        // then put back where the reader was.
+        let trim = "window.__omamvShotY = window.scrollY; document.body.classList.add('om-shot'); 1";
+        self.web.evaluate_javascript(trim, None, None, gio::Cancellable::NONE, move |_| {
+            // A moment for WebKit to lay the trimmed page out before drawing it.
+            glib::timeout_add_local_once(Duration::from_millis(150), move || {
+                if let Some(w) = weak.upgrade() {
+                    w.snapshot_page(dir, path);
+                }
+            });
+        });
+    }
+
+    fn snapshot_page(&self, dir: PathBuf, path: PathBuf) {
+        let weak = self.weak();
+        self.web.snapshot(webkit6::SnapshotRegion::FullDocument, webkit6::SnapshotOptions::NONE, gio::Cancellable::NONE, move |r| {
+            let Some(w) = weak.upgrade() else { return };
+            w.js("document.body.classList.remove('om-shot'); window.scrollTo({ top: window.__omamvShotY || 0, behavior: 'instant' })");
+            let texture = match r {
+                Ok(t) => t,
+                Err(e) => return w.status.note(&format!("the page could not be drawn: {e}")),
+            };
+            let saved = std::fs::create_dir_all(&dir).map_err(|e| e.to_string()).and_then(|()| texture.save_to_png(&path).map_err(|e| e.to_string()));
+            w.window.clipboard().set_texture(&texture);
+            match saved {
+                Ok(()) => w.status.note(&format!("page saved as {} and copied ({}×{})", folder::tilde(&path), texture.width(), texture.height())),
+                Err(e) => w.status.note(&format!("page copied, not saved: {e}")),
+            }
+        });
     }
 
     /// `e`: the open file in the reader's editor (ADR-0021).
