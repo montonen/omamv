@@ -49,6 +49,7 @@ Press `?` in the window for all of them.
 | `y` | copy the file's path |
 | `]` `[` or `J` `K` | next / previous file |
 | `Ctrl+B` | folder tree: focus, or hide (`j k h l`, arrows, `Enter`, `Esc` inside) |
+| `<` `>` | folder tree narrower / wider (or drag its edge) |
 | `Ctrl+F` or `/` · `n` `N` | find |
 | `Alt+←` `Alt+→` | back / forward |
 | `Ctrl+O` · `Ctrl+Shift+O` | open a folder · recent folders |

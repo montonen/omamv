@@ -38,6 +38,7 @@ impl Mode {
                 ("h l ← →", "fold / unfold"),
                 ("Enter", "open"),
                 ("Esc", "back to the page"),
+                ("< >", "width"),
                 ("Ctrl+B", "hide the tree"),
                 ("?", "all keys"),
             ],

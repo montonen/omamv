@@ -134,7 +134,7 @@ impl Tree {
         widget.append(&head);
         widget.append(&scroller);
         widget.append(&left_out);
-        widget.set_width_request(200);
+        widget.set_width_request(crate::settings::TREE_MIN as i32);
 
         let tree = Rc::new(Tree {
             widget,

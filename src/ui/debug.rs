@@ -466,6 +466,29 @@ mod imp {
         press(&w, gdk::Key::Escape);
         sleep(100).await;
         r.check("Esc in the tree returns to the page", !w.tree.has_focus() && w.split.shows_sidebar(), "");
+
+        // ---- the tree's width
+        r.check("the tree starts at the usual width", w.tree_width() == crate::settings::TREE_DEFAULT, w.tree_width());
+        press(&w, gdk::Key::greater);
+        r.check("> widens the tree, and it is kept", w.tree_width() == crate::settings::TREE_DEFAULT + 32 && crate::settings::get().tree_width == w.tree_width(), w.tree_width());
+        press(&w, gdk::Key::less);
+        press(&w, gdk::Key::less);
+        r.check("< narrows it", w.tree_width() == crate::settings::TREE_DEFAULT - 32, w.tree_width());
+        w.set_tree_width(5_000.0);
+        let widest = w.tree_width();
+        r.check("  never wider than its limit, and the page keeps room", widest <= crate::settings::TREE_MAX && i64::from(widest) <= i64::from(w.window.width()) - 320, format!("{widest} of {}", w.window.width()));
+        w.set_tree_width(10.0);
+        r.check("  never narrower than its limit", w.tree_width() == crate::settings::TREE_MIN, w.tree_width());
+        let mut s = crate::settings::get();
+        s.tree_width = 400;
+        crate::settings::set(s);
+        super::super::apply_settings();
+        wait_until(2_000, || (396..=404).contains(&w.tree.widget.width())).await;
+        let laid = w.tree.widget.width();
+        r.check("a width from Settings applies to the window", w.tree_width() == 400 && (396..=404).contains(&laid), format!("{} laid out {laid}", w.tree_width()));
+        r.note("shot wide tree", shot(&w, &shots.join("3b-wide-tree.png")).await);
+        crate::settings::set(crate::settings::Settings::default());
+        super::super::apply_settings();
         // One click on a file opens it (ADR-0013).
         let row = w.tree.position_of("CONTRIBUTING.md");
         nav(&w, || {

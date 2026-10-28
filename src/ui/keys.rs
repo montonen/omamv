@@ -33,6 +33,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("↓ ↑ ← →", "tree: move, fold, unfold"),
             ("Enter", "tree: open the file"),
             ("Esc", "tree: back to the page"),
+            ("< / >", "tree: narrower / wider"),
             ("Ctrl+O", "open a folder"),
             ("Ctrl+Shift+O", "recent folders"),
         ],

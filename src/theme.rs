@@ -328,6 +328,8 @@ headerbar.om-header button:hover { background: alpha(@om_fg, 0.08); }
 /* Folder tree: slim, muted until it has the keyboard. */
 .om-tree { background: @sidebar_bg_color; border-left: 1px solid alpha(@om_muted, 0.6); color: alpha(@om_fg, 0.7); }
 .om-tree:focus-within { color: @om_fg; }
+.om-tree-handle { background: transparent; }
+.om-tree-handle:hover { background: alpha(@om_accent, 0.5); }
 .om-tree.om-tree-left { border-left: none; border-right: 1px solid alpha(@om_muted, 0.6); }
 .om-tree-head { padding: 4px 14px 10px 14px; font-size: 0.86em; }
 .om-tree-name { font-weight: 600; letter-spacing: 0.02em; color: alpha(@om_fg, 0.7); }

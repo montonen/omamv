@@ -114,6 +114,9 @@ pub struct Win {
     /// The settings this window last took (ADR-0014).
     applied: RefCell<Option<crate::settings::Settings>>,
     pub split: adw::OverlaySplitView,
+    tree_handle: gtk::Box,
+    /// The width a drag of the tree's edge started from.
+    drag_from: Cell<f64>,
     pub tree: Rc<Tree>,
     stack: gtk::Stack,
     empty_page: adw::StatusPage,
@@ -250,13 +253,26 @@ impl Win {
         banner.add_css_class("om-banner");
 
         let tree = Tree::new();
+        // A thin edge on the tree's page side: drag it to resize the tree.
+        let tree_handle = gtk::Box::builder()
+            .width_request(6)
+            .halign(gtk::Align::Start)
+            .vexpand(true)
+            .tooltip_text("Drag to resize, double-click for the usual width (< and > too)")
+            .build();
+        tree_handle.add_css_class("om-tree-handle");
+        tree_handle.set_cursor_from_name(Some("col-resize"));
+        let tree_box = gtk::Overlay::new();
+        tree_box.set_child(Some(&tree.widget));
+        tree_box.add_overlay(&tree_handle);
+        let width = f64::from(crate::settings::get().tree_width);
         let split = adw::OverlaySplitView::builder()
-            .sidebar(&tree.widget)
+            .sidebar(&tree_box)
             .content(&web)
             .sidebar_position(gtk::PackType::End)
-            .max_sidebar_width(248.0)
-            .min_sidebar_width(200.0)
-            .sidebar_width_fraction(0.22)
+            .max_sidebar_width(width)
+            .min_sidebar_width(width)
+            .sidebar_width_fraction(1.0)
             .show_sidebar(true)
             .build();
         tree_button.bind_property("active", &split, "show-sidebar").bidirectional().sync_create().build();
@@ -325,6 +341,8 @@ impl Win {
             status,
             applied: RefCell::new(None),
             split,
+            tree_handle,
+            drag_from: Cell::new(0.0),
             tree,
             stack,
             empty_page,
@@ -571,6 +589,41 @@ impl Win {
             self.window.add_action(&action);
         }
 
+        // The tree's edge: drag to resize, double-click for the usual width.
+        let drag = gtk::GestureDrag::new();
+        let weak = self.weak();
+        drag.connect_drag_begin(move |_, _, _| {
+            if let Some(w) = weak.upgrade() {
+                w.drag_from.set(w.split.max_sidebar_width());
+            }
+        });
+        let weak = self.weak();
+        drag.connect_drag_update(move |_, dx, _| {
+            if let Some(w) = weak.upgrade() {
+                // The edge faces the page: dragging toward the page widens.
+                let sign = if crate::settings::get().tree_left { 1.0 } else { -1.0 };
+                w.set_tree_width(w.drag_from.get() + sign * dx);
+            }
+        });
+        let weak = self.weak();
+        drag.connect_drag_end(move |_, _, _| {
+            if let Some(w) = weak.upgrade() {
+                w.keep_tree_width();
+            }
+        });
+        self.tree_handle.add_controller(drag);
+        let twice = gtk::GestureClick::new();
+        let weak = self.weak();
+        twice.connect_pressed(move |_, n, _, _| {
+            if n == 2
+                && let Some(w) = weak.upgrade()
+            {
+                w.set_tree_width(f64::from(crate::settings::TREE_DEFAULT));
+                w.keep_tree_width();
+            }
+        });
+        self.tree_handle.add_controller(twice);
+
         // Keys: the window sees them before the page does.
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -774,6 +827,8 @@ impl Win {
             "bracketleft" | "K" => self.step_file(-1),
             "slash" => self.open_find(),
             "o" => self.outline(),
+            "less" => self.step_tree_width(-32.0),
+            "greater" => self.step_tree_width(32.0),
             "y" => self.copy_path(),
             "n" => self.find_again(1),
             "N" => self.find_again(-1),
@@ -1483,6 +1538,46 @@ impl Win {
         }
     }
 
+    /// The tree this wide, within its limits and leaving the page room.
+    pub fn set_tree_width(&self, px: f64) {
+        let room = f64::from(self.window.width().max(0)) - 320.0;
+        let max = f64::from(crate::settings::TREE_MAX).min(room).max(f64::from(crate::settings::TREE_MIN));
+        let px = px.clamp(f64::from(crate::settings::TREE_MIN), max).round();
+        // Max first when widening, min first when narrowing: never min > max.
+        if px > self.split.max_sidebar_width() {
+            self.split.set_max_sidebar_width(px);
+            self.split.set_min_sidebar_width(px);
+        } else {
+            self.split.set_min_sidebar_width(px);
+            self.split.set_max_sidebar_width(px);
+        }
+    }
+
+    pub fn tree_width(&self) -> u32 {
+        self.split.max_sidebar_width() as u32
+    }
+
+    /// Keep the tree's width for the next window, and every open one.
+    fn keep_tree_width(&self) {
+        let px = self.tree_width();
+        let mut s = crate::settings::get();
+        if s.tree_width != px {
+            s.tree_width = px;
+            crate::settings::set(s);
+            super::apply_settings();
+        }
+    }
+
+    /// `<` and `>`: the tree narrower or wider.
+    fn step_tree_width(&self, by: f64) {
+        if !self.split.shows_sidebar() {
+            return;
+        }
+        self.set_tree_width(self.split.max_sidebar_width() + by);
+        self.keep_tree_width();
+        self.status.note(&format!("tree {} px", self.tree_width()));
+    }
+
     fn set_zoom(&self, z: f64) {
         let z = (z * 20.0).round() / 20.0;
         let z = z.clamp(0.5, 3.0);
@@ -1505,6 +1600,10 @@ impl Win {
             self.tree.widget.remove_css_class("om-tree-left");
         }
         self.tree_button.set_icon_name(if s.tree_left { "sidebar-show-symbolic" } else { "sidebar-show-right-symbolic" });
+        self.tree_handle.set_halign(if s.tree_left { gtk::Align::End } else { gtk::Align::Start });
+        if self.tree_width() != s.tree_width {
+            self.set_tree_width(f64::from(s.tree_width));
+        }
         self.status.show_hints(s.key_hints);
         // Only what changed: a new text size resets a passing Ctrl+plus, a
         // new skip rule walks the folder again, a new page width or picture

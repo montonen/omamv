@@ -39,6 +39,8 @@ pub struct Settings {
     pub text_size: u32,
     pub width: Width,
     pub tree_left: bool,
+    /// The folder tree's width in pixels (ADR-0004 amendment).
+    pub tree_width: u32,
     pub key_hints: bool,
     pub hidden: bool,
     pub gitignore: bool,
@@ -49,6 +51,11 @@ pub struct Settings {
     pub html: bool,
 }
 
+/// The folder tree's width: narrowest, widest, and to start with.
+pub const TREE_MIN: u32 = 160;
+pub const TREE_MAX: u32 = 720;
+pub const TREE_DEFAULT: u32 = 248;
+
 /// The text sizes offered, in percent.
 pub const TEXT_SIZES: [u32; 6] = [80, 90, 100, 110, 125, 150];
 
@@ -58,6 +65,7 @@ impl Default for Settings {
             text_size: 100,
             width: Width::Narrow,
             tree_left: false,
+            tree_width: TREE_DEFAULT,
             key_hints: true,
             hidden: false,
             gitignore: true,
@@ -90,6 +98,11 @@ impl Settings {
                 .and_then(|w| Width::ALL.into_iter().find(|x| x.name() == w))
                 .unwrap_or(d.width),
             tree_left: table.get("tree_side").and_then(toml::Value::as_str).map_or(d.tree_left, |s| s == "left"),
+            tree_width: table
+                .get("tree_width")
+                .and_then(toml::Value::as_integer)
+                .and_then(|n| u32::try_from(n).ok())
+                .map_or(d.tree_width, |n| n.clamp(TREE_MIN, TREE_MAX)),
             key_hints: flag("key_hints", d.key_hints),
             hidden: flag("show_hidden", d.hidden),
             gitignore: flag("respect_gitignore", d.gitignore),
@@ -102,11 +115,12 @@ impl Settings {
     pub fn to_toml(&self) -> String {
         format!(
             "# omamv settings (Ctrl+, in the window)\n\
-             text_size = {}\npage_width = \"{}\"\ntree_side = \"{}\"\nkey_hints = {}\n\
+             text_size = {}\npage_width = \"{}\"\ntree_side = \"{}\"\ntree_width = {}\nkey_hints = {}\n\
              show_hidden = {}\nrespect_gitignore = {}\nweb_pictures = {}\non_open = \"{}\"\nshow_html = {}\n",
             self.text_size,
             self.width.name(),
             if self.tree_left { "left" } else { "right" },
+            self.tree_width,
             self.key_hints,
             self.hidden,
             self.gitignore,
@@ -160,6 +174,7 @@ mod tests {
             text_size: 125,
             width: Width::Wide,
             tree_left: true,
+            tree_width: 400,
             key_hints: false,
             hidden: true,
             gitignore: false,
@@ -174,5 +189,7 @@ mod tests {
     fn nonsense_falls_back_to_defaults() {
         assert_eq!(Settings::parse("text_size = 7\npage_width = \"huge\"\nthis is not toml"), Settings::default());
         assert_eq!(Settings::parse("text_size = 110").text_size, 110);
+        assert_eq!(Settings::parse("tree_width = 9000").tree_width, TREE_MAX);
+        assert_eq!(Settings::parse("tree_width = -4").tree_width, TREE_DEFAULT);
     }
 }

@@ -61,6 +61,14 @@ pub fn dialog() -> adw::PreferencesDialog {
         let left = row.selected() == 1;
         change(|s| s.tree_left = left);
     });
+    let width_row = adw::SpinRow::with_range(f64::from(settings::TREE_MIN), f64::from(settings::TREE_MAX), 8.0);
+    width_row.set_title("Folder tree width");
+    width_row.set_subtitle("In pixels. Drag the tree's edge, or press < and >");
+    width_row.set_value(f64::from(s.tree_width));
+    width_row.connect_value_notify(|row| {
+        let px = row.value() as u32;
+        change(|s| s.tree_width = px);
+    });
     let hints = switch("Key hints in the status bar", "The keys that matter where the keyboard is; ? shows all of them", s.key_hints);
     hints.connect_active_notify(|row| {
         let on = row.is_active();
@@ -68,6 +76,7 @@ pub fn dialog() -> adw::PreferencesDialog {
     });
     let window = adw::PreferencesGroup::builder().title("Window").build();
     window.add(&side);
+    window.add(&width_row);
     window.add(&hints);
 
     let hidden = switch("Show hidden files and folders", "Names starting with a dot", s.hidden);
