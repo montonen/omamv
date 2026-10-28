@@ -383,6 +383,22 @@ mod imp {
         }
         press(&w, gdk::Key::y);
         r.check("y copies the file's path", w.status.shown_note().is_some_and(|n| n.starts_with("copied ") && n.ends_with("docs/architecture.md")), format!("{:?}", w.status.shown_note()));
+        // e: a stand-in editor that writes down what it was given, outside the folder.
+        let handed = report.with_extension("edited");
+        let mut s = crate::settings::get();
+        s.editor = format!("sh -c 'printf %s \"$0\" > {}'", handed.display());
+        crate::settings::set(s);
+        press(&w, gdk::Key::e);
+        wait_until(3_000, || handed.is_file()).await;
+        let given = std::fs::read_to_string(&handed).unwrap_or_default();
+        r.check("e hands the open file to the editor set", given == root.join("docs/architecture.md").to_string_lossy() && w.status.shown_note().as_deref() == Some("opened in sh"), format!("{given:?} {:?}", w.status.shown_note()));
+        let mut s = crate::settings::get();
+        s.editor = "no-such-editor-omamv".into();
+        crate::settings::set(s);
+        press(&w, gdk::Key::e);
+        r.check("  an editor that is not there says so", w.status.shown_note().is_some_and(|n| n.contains("no-such-editor-omamv not found")), format!("{:?}", w.status.shown_note()));
+        crate::settings::set(crate::settings::Settings::default());
+        super::super::apply_settings();
         let report_md = root.join("notes/agent-report.md");
         let _ = std::fs::write(&report_md, "# Agent report\n");
         let named = wait_until(4_000, || w.status.shown_note().is_some_and(|n| n.contains("notes/agent-report.md"))).await;

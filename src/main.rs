@@ -1,6 +1,7 @@
 //! omamv — the Omarchy Markdown Viewer: a read-only, keyboard-first viewer
 //! for a folder of Markdown and text files.
 
+mod editor;
 mod folder;
 mod fuzzy;
 mod places;

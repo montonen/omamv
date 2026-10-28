@@ -47,6 +47,7 @@ Press `?` in the window for all of them.
 | `Ctrl+P` | open a file: newest first, with ages; type to find any |
 | `o` | outline: go to a heading |
 | `y` | copy the file's path |
+| `e` | open the file in your editor: Omarchy's by default, or the command set in Settings |
 | `]` `[` or `J` `K` | next / previous file |
 | `Ctrl+B` | folder tree: focus, or hide (`j k h l`, arrows, `Enter`, `Esc` inside) |
 | `<` `>` | folder tree narrower / wider (or drag its edge) |

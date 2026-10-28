@@ -126,6 +126,17 @@ pub fn dialog() -> adw::PreferencesDialog {
         let on = row.is_active();
         change(|s| s.web_pictures = on);
     });
+    let editor = adw::EntryRow::builder().title("Editor command").text(&s.editor).show_apply_button(true).build();
+    editor.connect_apply(|row| {
+        let text = row.text().trim().to_owned();
+        change(|s| s.editor = text);
+    });
+    let editing = adw::PreferencesGroup::builder()
+        .title("Editing")
+        .description("e opens the file in it, with the file's path added at the end. Empty: Omarchy's default editor. omamv itself never writes.")
+        .build();
+    editing.add(&editor);
+
     let privacy = adw::PreferencesGroup::builder().title("Privacy").build();
     privacy.add(&web);
 
@@ -133,6 +144,7 @@ pub fn dialog() -> adw::PreferencesDialog {
     page.add(&reading);
     page.add(&window);
     page.add(&folder);
+    page.add(&editing);
     page.add(&privacy);
     let dialog = adw::PreferencesDialog::builder().title("Settings").build();
     dialog.add(&page);

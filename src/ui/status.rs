@@ -31,6 +31,7 @@ impl Mode {
                 ("] [", "next / previous file"),
                 ("Ctrl+B", "tree"),
                 ("/", "find"),
+                ("e", "edit"),
                 ("?", "all keys"),
             ],
             Mode::Tree => &[

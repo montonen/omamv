@@ -28,6 +28,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("Ctrl+P", "open a file, newest first"),
             ("y", "copy the file's path"),
+            ("e", "open the file in your editor"),
             ("] / [", "next / previous file"),
             ("J / K", "next / previous file"),
             ("Ctrl+B", "folder tree: focus, or hide"),

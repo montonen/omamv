@@ -49,6 +49,9 @@ pub struct Settings {
     pub ask_on_open: bool,
     /// HTML pages listed and shown, without their scripts (ADR-0016).
     pub html: bool,
+    /// The editor `e` opens a file in (ADR-0021): a command, the file's path
+    /// added at the end. Empty: Omarchy's default editor.
+    pub editor: String,
 }
 
 /// The folder tree's width: narrowest, widest, and to start with.
@@ -72,6 +75,7 @@ impl Default for Settings {
             web_pictures: true,
             ask_on_open: false,
             html: false,
+            editor: String::new(),
         }
     }
 }
@@ -109,6 +113,7 @@ impl Settings {
             web_pictures: flag("web_pictures", d.web_pictures),
             ask_on_open: table.get("on_open").and_then(toml::Value::as_str).map_or(d.ask_on_open, |s| s == "open-by-name"),
             html: flag("show_html", d.html),
+            editor: table.get("editor").and_then(toml::Value::as_str).map(str::trim).unwrap_or("").to_owned(),
         }
     }
 
@@ -116,7 +121,8 @@ impl Settings {
         format!(
             "# omamv settings (Ctrl+, in the window)\n\
              text_size = {}\npage_width = \"{}\"\ntree_side = \"{}\"\ntree_width = {}\nkey_hints = {}\n\
-             show_hidden = {}\nrespect_gitignore = {}\nweb_pictures = {}\non_open = \"{}\"\nshow_html = {}\n",
+             show_hidden = {}\nrespect_gitignore = {}\nweb_pictures = {}\non_open = \"{}\"\nshow_html = {}\n\
+             # Empty: Omarchy's default editor (omarchy-launch-editor)\neditor = {}\n",
             self.text_size,
             self.width.name(),
             if self.tree_left { "left" } else { "right" },
@@ -127,6 +133,7 @@ impl Settings {
             self.web_pictures,
             if self.ask_on_open { "open-by-name" } else { "first-file" },
             self.html,
+            toml::Value::String(self.editor.clone()),
         )
     }
 }
@@ -181,6 +188,7 @@ mod tests {
             web_pictures: false,
             ask_on_open: true,
             html: true,
+            editor: "code --wait \"x\"".into(),
         };
         assert_eq!(Settings::parse(&s.to_toml()), s);
     }

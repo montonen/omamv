@@ -859,6 +859,7 @@ impl Win {
             "less" => self.step_tree_width(-32.0),
             "greater" => self.step_tree_width(32.0),
             "y" => self.copy_path(),
+            "e" => self.edit(),
             "n" => self.find_again(1),
             "N" => self.find_again(-1),
             "question" => self.show_keys(),
@@ -1509,6 +1510,19 @@ impl Win {
             }
         });
         qo.present(&self.window);
+    }
+
+    /// `e`: the open file in the reader's editor (ADR-0021).
+    fn edit(&self) {
+        let (Some(root), Some(file)) = (self.root(), self.current.borrow().clone()) else { return };
+        if self.gone.get() {
+            self.status.note("the file was removed: nothing to edit");
+            return;
+        }
+        match crate::editor::open(&crate::settings::get().editor, &root.join(&file)) {
+            Ok(name) => self.status.note(&format!("opened in {name}")),
+            Err(why) => self.status.note(&why),
+        }
     }
 
     /// `y`: the open file's full path to the clipboard.
