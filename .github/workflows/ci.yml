@@ -1,0 +1,93 @@
+# Build, lint, test and the offscreen self-check, on every push and pull
+# request; and on a night's packages once a week.
+#
+# In an Arch container, since that is what Omarchy is: the packages the README
+# tells a person to install, at the versions a person would get today.
+#
+# The self-check (scripts/check.sh, which ends with scripts/smoke.sh) needs a
+# display and gets GTK's Broadway, which needs no compositor. WebKit's own
+# sandbox cannot start inside a container (no user namespaces), so it is off
+# here, and only here: both scripts pass that one setting through, and the
+# pages drawn are the fixture's.
+#
+# Minutes: the account has 3,000 a month (GitHub Pro). One push is about
+# eight: two jobs beside each other, three to four minutes each (packages,
+# build, then lint and tests or the checks). A newer push to the same branch
+# cancels the run before it. Development is local: it runs only on a push.
+name: CI
+
+on:
+  push:
+  pull_request:
+  # Mondays at 03:41 UTC, not on the hour: a change in GTK, libadwaita or
+  # WebKit shows even when nothing here changed.
+  schedule:
+    - cron: '41 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Build, lint and test
+    # A pull request from this repository was built by its push already.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 30
+    steps:
+      - name: Install what the README says to install
+        run: pacman -Syu --noconfirm --needed gtk4 libadwaita webkitgtk-6.0 rust base-devel git
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --locked
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked
+
+  check:
+    name: Self-check and smoke, offscreen
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 30
+    env:
+      XDG_RUNTIME_DIR: /tmp/runtime
+      # libadwaita asks a desktop portal for light or dark; there is none here.
+      ADW_DISABLE_PORTAL: '1'
+      # See the top of this file.
+      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+    steps:
+      # gtk4 brings Broadway's daemon; a font so the page has text to lay out;
+      # procps for pgrep, which the scripts use to find a free display.
+      - name: Install what the README says to install, and what the checks need
+        run: pacman -Syu --noconfirm --needed gtk4 libadwaita webkitgtk-6.0 rust base-devel git ttf-dejavu procps-ng
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Make the runtime directory
+        run: install -d -m 700 "$XDG_RUNTIME_DIR"
+      # check.sh ends with scripts/smoke.sh, the real binary's cases.
+      - name: Self-check and smoke
+        timeout-minutes: 15
+        run: KEEP=1 scripts/check.sh
+      - name: Keep the report and pictures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-report
+          overwrite: true
+          path: |
+            target/check/report.txt
+            target/check/report.shots/
+            target/smoke/
+          retention-days: 14

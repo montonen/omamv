@@ -21,6 +21,9 @@ pub enum Node {
     File(PathBuf),
 }
 
+/// What a file picked in the tree does.
+type OnOpen = Box<dyn Fn(PathBuf)>;
+
 pub struct Tree {
     pub widget: gtk::Box,
     pub list: gtk::ListView,
@@ -37,7 +40,7 @@ pub struct Tree {
     /// The rows GTK has made, to draw the cursor on the right one.
     items: Rc<RefCell<Vec<glib::WeakRef<gtk::ListItem>>>>,
     /// A file was chosen: Enter or a click on a file row.
-    on_open: RefCell<Option<Box<dyn Fn(PathBuf)>>>,
+    on_open: RefCell<Option<OnOpen>>,
 }
 
 fn store_for(dir: &Dir) -> gio::ListStore {

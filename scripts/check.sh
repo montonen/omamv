@@ -60,7 +60,7 @@ mkdir -p "$work/config/gtk-4.0"
 printf '[Settings]\ngtk-enable-animations=false\n' > "$work/config/gtk-4.0/settings.ini"
 
 set +e
-env -i HOME="$HOME" PATH="$PATH" LANG="${LANG:-C.UTF-8}" \
+env -i HOME="$HOME" PATH="$PATH" ${WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS:+WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1} LANG="${LANG:-C.UTF-8}" \
   XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}" \
   XDG_STATE_HOME="$work/state" XDG_CONFIG_HOME="$work/config" \
   XDG_DATA_HOME="$work/data" XDG_CACHE_HOME="$work/cache" \

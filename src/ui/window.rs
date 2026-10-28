@@ -25,6 +25,9 @@ use crate::scheme;
 
 static NEXT_HOST: AtomicU32 = AtomicU32::new(1);
 
+/// A window action: its name and what it does.
+type Action = (&'static str, fn(&Win));
+
 /// Visits kept for back and forward.
 const HISTORY: usize = 200;
 
@@ -577,7 +580,7 @@ impl Win {
         });
 
         // Actions for the menu.
-        let actions: [(&str, fn(&Win)); 5] = [
+        let actions: [Action; 5] = [
             ("open-folder", Win::choose_folder),
             ("recent", Win::show_recent),
             ("settings", Win::show_settings),

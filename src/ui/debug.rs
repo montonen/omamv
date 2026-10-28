@@ -223,8 +223,13 @@ mod imp {
         r.check("tree lists the files", w.scan.borrow().order.len() >= 5, w.scan.borrow().order.len());
         let mermaid = js(&w, "String(document.querySelectorAll('figure.mermaid-drawn svg').length)").await;
         r.check("Mermaid drawn", mermaid == "2", &mermaid);
-        let failed = js(&w, "String(document.querySelectorAll('pre.diagram-failed').length)").await;
+        // Without PlantUML (CI's container) its diagrams say so instead; that is not this check.
+        let failed = js(&w, "String([...document.querySelectorAll('pre.diagram-failed')].filter(p => !(p.dataset.error || '').includes('not installed')).length)").await;
         r.check("a broken diagram shows as code", failed == "1", &failed);
+        let missing = js(&w, "String(document.querySelectorAll('pre.diagram-failed[data-error*=\"not installed\"]').length)").await;
+        if missing != "0" {
+            r.note("PlantUML not installed here; its diagrams say so", &missing);
+        }
         let puml = js(&w, "String([...document.querySelectorAll('figure.plantuml img')].filter(i => i.naturalWidth > 0).length)").await;
         r.note("PlantUML drawn", &puml);
         let code = js(&w, "String(document.querySelectorAll('[class*=sy-]').length)").await;

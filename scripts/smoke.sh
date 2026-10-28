@@ -41,7 +41,7 @@ fail() { echo "FAIL $1"; fails=$((fails + 1)); }
 # omamv ARGS... for a few seconds; the trace in $out.
 launch() {
   out="$case_dir/trace-$1.txt"; shift
-  env -i HOME="$HOME" PATH="$PATH" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}" \
+  env -i HOME="$HOME" PATH="$PATH" ${WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS:+WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1} XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}" \
     XDG_STATE_HOME="$case_dir/state" XDG_CONFIG_HOME="$case_dir/config" GDK_BACKEND=broadway BROADWAY_DISPLAY=":$display" \
     DBUS_SESSION_BUS_ADDRESS=disabled: OMAMV_ALONE=1 OMAMV_DEBUG=1 \
     timeout "${WAIT:-6}" "$bin" "$@" > "$out" 2>&1

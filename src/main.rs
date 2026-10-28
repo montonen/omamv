@@ -85,10 +85,8 @@ fn main() -> glib::ExitCode {
 
     // Like `code .`: from a terminal, hand over to a copy of omamv and give
     // the prompt back at once.
-    if !wait && std::env::var_os(DETACHED).is_none() && std::io::stdout().is_terminal() && !ui::debug::alone() {
-        if detach() {
-            return glib::ExitCode::SUCCESS;
-        }
+    if !wait && std::env::var_os(DETACHED).is_none() && std::io::stdout().is_terminal() && !ui::debug::alone() && detach() {
+        return glib::ExitCode::SUCCESS;
     }
 
     let mut flags = gio::ApplicationFlags::HANDLES_COMMAND_LINE;
@@ -96,7 +94,7 @@ fn main() -> glib::ExitCode {
         flags |= gio::ApplicationFlags::NON_UNIQUE;
     }
     let app = adw::Application::builder().application_id(APP_ID).flags(flags).build();
-    app.connect_startup(|app| ui::startup(app));
+    app.connect_startup(ui::startup);
     app.connect_activate(|app| {
         ui::open(app, None);
     });
