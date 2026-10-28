@@ -59,8 +59,9 @@ pub fn page(root: &Path, cards: &[PathBuf], sel: usize, all: Arc<Vec<PathBuf>>, 
             .unwrap_or_default();
         let secs = now.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
         let git = crate::git::look(&full).map(|l| crate::git::words(&l, secs)).unwrap_or_default();
-        let dir = rel.parent().map(|p| p.display().to_string()).filter(|d| !d.is_empty()).unwrap_or_else(|| "·".into());
-        let sub = if git.is_empty() { esc(&dir) } else { format!("{} · {}", esc(&dir), esc(&git)) };
+        // The folder it is in, and its git state; a file at the root has no folder to name.
+        let dir = rel.parent().map(|p| p.display().to_string()).unwrap_or_default();
+        let sub = [dir.as_str(), git.as_str()].iter().filter(|p| !p.is_empty()).map(|p| esc(p)).collect::<Vec<_>>().join(" · ");
         html.push_str(&format!(
             r#"<div class="om-card{selected}" data-i="{i}"><a class="om-card-hit" href="{href}" aria-label="{name}"></a><div class="om-card-head"><kbd>{key}</kbd><span class="om-card-name">{name}</span><span class="om-card-age">{age}</span></div><div class="om-card-sub">{sub}</div><div class="om-card-view"><div class="om-card-page" style="width:{w}px">{body}</div></div></div>"#,
             href = esc(&crate::wiki::href(Some(rel), None)),
