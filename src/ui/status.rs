@@ -56,12 +56,16 @@ impl Mode {
 /// (keys, what they do), built at run time.
 type Hints = Vec<(String, String)>;
 
+/// What the window asks the bar to run later.
+type Hook = std::rc::Rc<std::cell::RefCell<Option<std::rc::Rc<dyn Fn()>>>>;
+
 pub struct Status {
     pub widget: gtk::Box,
     hints: gtk::Box,
-    clip: gtk::ScrolledWindow,
-    /// Held shortcuts left out for want of room.
+    /// Shortcuts left out for want of room.
     left_out: Cell<usize>,
+    /// Fits the hints again once a note has timed out (set by the window).
+    refit_hook: Hook,
     place: gtk::Label,
     mode: Cell<Option<Mode>>,
     /// A passing note on the right (the load time), in place of the file's
@@ -96,8 +100,8 @@ impl Status {
         Status {
             widget,
             hints,
-            clip,
             left_out: Cell::new(0),
+            refit_hook: Default::default(),
             place,
             mode: Cell::new(None),
             note: Default::default(),
@@ -115,15 +119,32 @@ impl Status {
     pub fn set(&self, mode: Mode, place: Option<(usize, usize)>) {
         let place = place.map(|(at, of)| format!("{at} / {of}")).unwrap_or_default();
         *self.last_place.borrow_mut() = place.clone();
+        let before = self.place.label();
         match self.note.borrow().as_ref() {
             Some(note) if place.is_empty() => self.place.set_label(note),
             Some(note) => self.place.set_label(&format!("{note}   ·   {place}")),
             None => self.place.set_label(&place),
         }
-        if self.mode.replace(Some(mode)) == Some(mode) || self.held.borrow().is_some() {
-            return;
+        let same = self.mode.replace(Some(mode)) == Some(mode);
+        if !same || self.place.label() != before {
+            self.refit();
         }
-        self.fill(None, mode.hints().iter().map(|(k, w)| (*k, *w)));
+    }
+
+    /// Fill the bar with what it shows now, held shortcuts or the mode's
+    /// keys, and fit them to the room there is.
+    pub fn refit(&self) {
+        if let Some((p, list)) = self.held.borrow().clone() {
+            self.fill(Some(&p), list.iter().map(|(k, w)| (k.as_str(), w.as_str())));
+        } else if let Some(mode) = self.mode.get() {
+            self.fill(None, mode.hints().iter().map(|(k, w)| (*k, *w)));
+        }
+        self.fit();
+    }
+
+    /// What the window does to fit the hints again later (a note timing out).
+    pub fn on_refit(&self, f: impl Fn() + 'static) {
+        *self.refit_hook.borrow_mut() = Some(std::rc::Rc::new(f));
     }
 
     fn fill<'a>(&self, prefix: Option<&str>, hints: impl Iterator<Item = (&'a str, &'a str)>) {
@@ -166,31 +187,32 @@ impl Status {
                 if self.held.borrow().as_ref().is_some_and(|(q, _)| q == p) {
                     return;
                 }
-                self.fill(Some(p), list.iter().map(|(k, w)| (k.as_str(), w.as_str())));
                 *self.held.borrow_mut() = Some((p.to_owned(), list));
                 self.hints.set_visible(true);
-                self.fit();
+                self.refit();
             }
             _ => {
                 if self.held.borrow_mut().take().is_none() {
                     return;
                 }
-                if let Some(mode) = self.mode.get() {
-                    self.fill(None, mode.hints().iter().map(|(k, w)| (*k, *w)));
-                }
+                self.refit();
                 self.hints.set_visible(self.hints_on.get());
             }
         }
     }
 
-    /// Held shortcuts that would run past the edge are left out, whole, and
-    /// a last chip says how many and where they all are (`?`).
+    /// Hints that would run past the edge (or into the note on the right)
+    /// are left out, whole, and a last chip says how many and where they all
+    /// are (`?`). The room is the bar less the note, worked out now rather
+    /// than from the last layout, so a note that just came is counted.
     fn fit(&self) {
         self.left_out.set(0);
-        let room = self.clip.width();
-        if room <= 0 {
+        let bar = self.widget.width();
+        if bar <= 0 {
             return;
         }
+        let (_, place, _, _) = self.place.measure(gtk::Orientation::Horizontal, -1);
+        let room = bar - place - self.widget.spacing() - 24;
         // What the "+N more" chip at the end needs.
         const MORE: i32 = 120;
         let kids: Vec<gtk::Widget> = std::iter::successors(self.hints.first_child(), |c| c.next_sibling()).collect();
@@ -235,10 +257,15 @@ impl Status {
         self.place.set_label(&if place.is_empty() { text.to_owned() } else { format!("{text}   ·   {place}") });
         let (note, label, last) = (self.note.clone(), self.place.clone(), self.last_place.clone());
         let mine = text.to_owned();
+        self.refit();
+        let hook = self.refit_hook.clone();
         glib::timeout_add_local_once(std::time::Duration::from_secs(8), move || {
             if note.borrow().as_deref() == Some(mine.as_str()) {
                 note.borrow_mut().take();
                 label.set_label(&last.borrow());
+                if let Some(f) = hook.borrow().clone() {
+                    f();
+                }
             }
         });
     }

@@ -1,0 +1,6 @@
+# One picture for the themes grid on montonen.se.
+size 1040 560
+tree 300
+open manual/06-themes.md
+wait 8500
+shot theme

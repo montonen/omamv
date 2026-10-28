@@ -693,6 +693,27 @@ impl Win {
             }
         });
 
+        // The status bar's hints fit the room again when a note times out
+        // or the window changes size.
+        let weak = self.weak();
+        self.status.on_refit(move || {
+            if let Some(w) = weak.upgrade() {
+                w.status.refit();
+            }
+        });
+        for prop in ["default-width", "maximized", "fullscreened"] {
+            let weak = self.weak();
+            self.window.connect_notify_local(Some(prop), move |_, _| {
+                let weak = weak.clone();
+                // After the new size is laid out.
+                glib::idle_add_local_once(move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.status.refit();
+                    }
+                });
+            });
+        }
+
         // The status bar follows the keyboard.
         let weak = self.weak();
         self.window.connect_notify_local(Some("focus-widget"), move |_, _| {

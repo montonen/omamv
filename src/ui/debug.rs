@@ -7,7 +7,7 @@
 /// A self-check is running: no hand-over to a background copy, no single
 /// instance shared with the user's own omamv.
 pub fn driven() -> bool {
-    cfg!(debug_assertions) && std::env::var_os("OMAMV_SELFTEST").is_some()
+    cfg!(debug_assertions) && (std::env::var_os("OMAMV_SELFTEST").is_some() || super::shots::driven())
 }
 
 /// A debug run of its own, never handing over to (or taking over) the

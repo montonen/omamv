@@ -1,0 +1,20 @@
+# montonen.se's pictures of omamv, over the Omarchy repository's own manual.
+#     scripts/shots.sh ~/.cache/omarepos-shots/home/Work/omarchy scripts/shots/site.plan <theme>/colors.toml <out>
+size 1040 560
+tree 300
+
+# Reading: the hotkeys page, the tree open on the manual.
+open manual/07-hotkeys.md
+shot reading
+
+# Quick open: a few letters, every page and its translations, newest first.
+key p ctrl
+type theme
+shot quick-open
+key Escape
+
+# The outline of a long page, its headings by depth.
+open manual/43-making-your-own-theme.md
+key o
+shot outline
+key Escape

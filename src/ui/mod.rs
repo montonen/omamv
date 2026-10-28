@@ -1,6 +1,7 @@
 //! The windows, and what they share: the theme, the `omamv://` scheme.
 
 pub mod debug;
+pub mod shots;
 mod keys;
 pub mod quickopen;
 mod settings;
@@ -135,6 +136,7 @@ pub fn open(app: &adw::Application, target: Option<PathBuf>) -> Option<Rc<Win>> 
     win.open_folder(&root, file);
     win.window.present();
     debug::maybe_start(&win);
+    shots::maybe_start(&win);
     Some(win)
 }
 
