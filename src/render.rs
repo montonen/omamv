@@ -297,6 +297,26 @@ pub fn markdown(src: &str, palette: &Palette) -> String {
 
 /// `links` resolves wikilinks to other files; without it only `[[#Heading]]` works.
 pub fn markdown_in(src: &str, palette: &Palette, links: Option<&Links>) -> String {
+    markdown_with(src, palette, links, None)
+}
+
+/// Lines of a file a gallery card draws (ADR-0024): its top, and no more.
+const PREVIEW_LINES: usize = 150;
+
+/// The top of a file for a gallery card (ADR-0024): drawn as its page is,
+/// but diagrams wait for the page itself (no PlantUML runs for a card), and
+/// pictures are found from the folder's root, where the gallery stands.
+pub fn preview(path: &Path, text: &str, palette: &Palette, links: &Links) -> String {
+    let top: String = text.lines().take(PREVIEW_LINES).collect::<Vec<_>>().join("\n");
+    if crate::folder::is_markdown(path) {
+        markdown_with(&top, palette, Some(links), Some(links.rel.parent().unwrap_or(Path::new(""))))
+    } else {
+        format!(r#"<pre class="plain">{}</pre>"#, esc(&top))
+    }
+}
+
+/// `preview`: the folder (from the root) of a file drawn for a gallery card.
+fn markdown_with(src: &str, palette: &Palette, links: Option<&Links>, preview: Option<&Path>) -> String {
     let opts = OPTS;
     let mut trusted = Trusted::new(src);
     let events = wikilinks(Parser::new_ext(src, opts), links, &mut trusted);
@@ -325,7 +345,10 @@ pub fn markdown_in(src: &str, palette: &Palette, links: Option<&Links>) -> Strin
                 Event::Text(t) => body.push_str(&t),
                 Event::End(TagEnd::CodeBlock) => {
                     let (lang, body) = code.take().unwrap_or_default();
-                    if matches!(lang.as_str(), "plantuml" | "puml" | "uml") {
+                    if preview.is_some() && matches!(lang.as_str(), "plantuml" | "puml" | "uml" | "mermaid") {
+                        let html = r#"<figure class="diagram om-later">diagram</figure>"#.to_owned();
+                        out.push(Event::Html(format!("{}\n", trusted.token(html)).into()));
+                    } else if matches!(lang.as_str(), "plantuml" | "puml" | "uml") {
                         let token = trusted.token(String::new());
                         diagrams.push((trusted.pieces.len() - 1, body));
                         out.push(Event::Html(format!("{token}\n").into()));
@@ -384,6 +407,11 @@ pub fn markdown_in(src: &str, palette: &Palette, links: Option<&Links>) -> Strin
                 };
                 out.push(Event::InlineHtml(trusted.token(html).into()));
             }
+            Event::Start(Tag::Image { link_type, dest_url, title, id }) if preview.is_some() && local(&dest_url) => {
+                let dir = wiki::href(preview, None);
+                let dest_url = CowStr::from(format!("{dir}/{dest_url}"));
+                out.push(Event::Start(Tag::Image { link_type, dest_url, title, id }));
+            }
             e => out.push(e),
         }
     }
@@ -397,6 +425,11 @@ pub fn markdown_in(src: &str, palette: &Palette, links: Option<&Links>) -> Strin
     let mut html = String::with_capacity(src.len() * 2);
     pulldown_cmark::html::push_html(&mut html, out.into_iter());
     trusted.put_back(clean(&html, &trusted.nonce))
+}
+
+/// A picture's address relative to its file, not absolute, a scheme or data.
+fn local(dest: &str) -> bool {
+    !dest.is_empty() && !dest.starts_with('/') && !dest.starts_with('#') && !dest.contains(':')
 }
 
 /// Raw HTML in a document keeps its structure and loses anything that runs.

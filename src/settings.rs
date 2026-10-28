@@ -23,6 +23,15 @@ impl Width {
         }
     }
 
+    /// The page's reading width in pixels: the full window's counts as wide,
+    /// for drawing a page small (the gallery, ADR-0024).
+    pub fn px(self) -> u32 {
+        match self {
+            Width::Narrow => 704,
+            Width::Wide | Width::Full => 944,
+        }
+    }
+
     /// The page's max-width in CSS.
     pub fn css(self) -> &'static str {
         match self {

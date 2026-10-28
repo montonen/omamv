@@ -27,6 +27,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
         "FILES",
         &[
             ("Ctrl+P", "open a file, newest first"),
+            ("Ctrl+G", "the gallery: the ten newest, 1–0 to open"),
             ("y", "copy the file's path"),
             ("e", "open the file in your editor"),
             ("Ctrl+Shift+S", "the whole page as a picture"),

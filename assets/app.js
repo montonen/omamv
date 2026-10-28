@@ -235,7 +235,25 @@ function gone(on) {
   return "ok";
 }
 
-window.omamv = { place, scroll: scrollCmd, find, step, endFind, gone };
+// ---- the gallery (ADR-0024) ----
+
+// Each card's page is drawn at the page's own width and scaled down to the
+// card's: the height follows from the width.
+function fitGallery() {
+  for (const page of document.querySelectorAll(".om-card-page")) {
+    const s = page.parentElement.clientWidth / page.offsetWidth;
+    page.style.transform = `scale(${s})`;
+  }
+}
+function select(i) {
+  document.querySelectorAll(".om-card").forEach((c) => c.classList.toggle("om-sel", Number(c.dataset.i) === i));
+}
+if (document.querySelector(".om-gallery")) {
+  fitGallery();
+  window.addEventListener("resize", fitGallery);
+}
+
+window.omamv = { place, scroll: scrollCmd, find, step, endFind, gone, select };
 window.__omamvLoaded = true;
 
 (async () => {

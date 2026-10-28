@@ -58,6 +58,15 @@ enum Timer {
     Reload,
     Rescan,
     Git,
+    Gallery,
+}
+
+/// The gallery while it shows (ADR-0024).
+struct Gallery {
+    /// The files on its cards, in order.
+    files: Vec<PathBuf>,
+    /// Whether the tree showed before it stepped aside.
+    tree_was: bool,
 }
 
 /// Where a reader was in a file: the heading above the top of the window and
@@ -121,6 +130,10 @@ pub struct Win {
     /// Its repository's own folder, followed for commits and staging.
     git_dir: RefCell<Option<PathBuf>>,
     git_timer: RefCell<Option<glib::SourceId>>,
+    gallery: RefCell<Option<Gallery>>,
+    /// The card highlighted, kept for a return to the gallery.
+    gallery_at: Cell<usize>,
+    gallery_timer: RefCell<Option<glib::SourceId>>,
     pub banner: adw::Banner,
     pub status: Status,
     /// The settings this window last took (ADR-0014).
@@ -355,6 +368,9 @@ impl Win {
             git_label,
             git_dir: RefCell::new(None),
             git_timer: RefCell::new(None),
+            gallery: RefCell::new(None),
+            gallery_at: Cell::new(0),
+            gallery_timer: RefCell::new(None),
             banner,
             status,
             applied: RefCell::new(None),
@@ -830,6 +846,14 @@ impl Win {
                 self.save_picture();
                 return true;
             }
+            (true, _, "g") => {
+                if self.gallery.borrow().is_some() {
+                    self.go_back(-1);
+                } else {
+                    self.show_gallery(true);
+                }
+                return true;
+            }
             (true, _, "b") => {
                 self.toggle_tree();
                 return true;
@@ -858,6 +882,27 @@ impl Win {
         }
         if typing || ctrl || alt {
             return false;
+        }
+
+        if self.gallery.borrow().is_some() {
+            let n = self.gallery.borrow().as_ref().map_or(0, |g| g.files.len());
+            let at = self.gallery_at.get();
+            match name.as_str() {
+                d if d.len() == 1 && d.as_bytes()[0].is_ascii_digit() => {
+                    let i = (usize::from(d.as_bytes()[0] - b'0') + 9) % 10;
+                    self.gallery_open(i);
+                }
+                "Left" | "h" => self.gallery_pick(at.saturating_sub(1)),
+                "Right" | "l" => self.gallery_pick((at + 1).min(n.saturating_sub(1))),
+                "Up" | "k" => self.gallery_pick(if at >= 5 { at - 5 } else { at }),
+                "Down" | "j" => self.gallery_pick(if at + 5 < n { at + 5 } else { at }),
+                "Return" | "KP_Enter" => self.gallery_open(at),
+                "Escape" | "H" => self.go_back(-1),
+                "L" => self.go_back(1),
+                "question" => self.show_keys(),
+                _ => return false,
+            }
+            return true;
         }
 
         if self.tree.has_focus() {
@@ -1111,7 +1156,8 @@ impl Win {
                 w.stack.set_visible_child_name(if empty { "empty" } else { "doc" });
                 w.set_chrome(!empty);
             }
-            let nothing_open = w.current.borrow().is_none();
+            // The gallery has no file open, and wants none of omamv's choosing.
+            let nothing_open = w.current.borrow().is_none() && w.gallery.borrow().is_none();
             let asked = w.pending_open.borrow_mut().take().filter(|f| scan.order.contains(f));
             // "Open a file by name" (ADR-0014): no file of omamv's choosing,
             // now or on a later walk; a file asked for still opens.
@@ -1134,6 +1180,9 @@ impl Win {
                 w.web.grab_focus();
             } else if empty {
                 w.empty_folder();
+            } else if changed && w.gallery.borrow().is_some() {
+                // A file came or went: the gallery's ten, from the new list.
+                w.build_gallery();
             } else if changed {
                 let cur = w.current.borrow().clone();
                 w.tree.mark(cur.as_deref());
@@ -1199,6 +1248,14 @@ impl Win {
     /// they were; `fragment` is a heading to go to.
     pub fn open_file(&self, file: &Path, fragment: Option<&str>, place: Option<Place>, record: bool) {
         let Some(root) = self.root() else { return };
+        // Out of the gallery: the tree as it was, and the card this file is
+        // on remembered for coming back.
+        if let Some(g) = self.gallery.borrow_mut().take() {
+            self.split.set_show_sidebar(g.tree_was);
+            if let Some(i) = g.files.iter().position(|f| f == file) {
+                self.gallery_at.set(i);
+            }
+        }
         if record {
             self.remember_place();
             let mut h = self.history.borrow_mut();
@@ -1323,7 +1380,8 @@ impl Win {
     pub fn go_back(&self, dir: i32) {
         let to = self.hist_at.get() as i64 + dir as i64;
         let len = self.history.borrow().len() as i64;
-        if self.current.borrow().is_none() || self.showing() != "doc" {
+        let in_gallery = self.gallery.borrow().is_some();
+        if (self.current.borrow().is_none() && !in_gallery) || self.showing() != "doc" {
             return;
         }
         if to < 0 || to >= len {
@@ -1333,6 +1391,10 @@ impl Win {
         self.remember_place();
         self.hist_at.set(to as usize);
         let visit = self.history.borrow()[to as usize].clone();
+        if visit.file.as_os_str().is_empty() {
+            self.show_gallery(false);
+            return;
+        }
         self.open_file(&visit.file, None, Some(visit.place), false);
     }
 
@@ -1386,6 +1448,10 @@ impl Win {
     }
 
     pub fn reload_keeping_place(&self) {
+        if self.gallery.borrow().is_some() {
+            self.build_gallery();
+            return;
+        }
         // A removed file's last version stays as it is: there is nothing to load.
         if self.gone.get() {
             return;
@@ -1427,6 +1493,10 @@ impl Win {
         if crate::watch::touches_tree(change) {
             self.debounce(Timer::Rescan);
         }
+        // A file written or added: the gallery's ten may have changed.
+        if self.gallery.borrow().is_some() && folder::is_shown(&change.path) {
+            self.debounce(Timer::Gallery);
+        }
     }
 
     fn debounce(&self, which: Timer) {
@@ -1434,6 +1504,7 @@ impl Win {
             Timer::Reload => (&self.reload_timer, 120),
             Timer::Rescan => (&self.rescan_timer, 300),
             Timer::Git => (&self.git_timer, 250),
+            Timer::Gallery => (&self.gallery_timer, 300),
         };
         if let Some(id) = slot.borrow_mut().take() {
             id.remove();
@@ -1449,6 +1520,12 @@ impl Win {
                 Timer::Git => {
                     w.git_timer.borrow_mut().take();
                     w.refresh_git();
+                }
+                Timer::Gallery => {
+                    w.gallery_timer.borrow_mut().take();
+                    if w.gallery.borrow().is_some() {
+                        w.build_gallery();
+                    }
                 }
                 Timer::Rescan => {
                     w.rescan_timer.borrow_mut().take();
@@ -1600,6 +1677,98 @@ impl Win {
             }
         });
         qo.present(&self.window);
+    }
+
+    /// Ctrl+G: the gallery of the ten newest files (ADR-0024). `record` puts
+    /// it in back and forward, as a visit with no file.
+    pub fn show_gallery(&self, record: bool) {
+        let Some(root) = self.root() else { return };
+        if self.scan.borrow().order.is_empty() {
+            return;
+        }
+        if record {
+            self.remember_place();
+            let mut h = self.history.borrow_mut();
+            let keep = if h.is_empty() { 0 } else { self.hist_at.get() + 1 };
+            h.truncate(keep);
+            h.push(Visit { file: PathBuf::new(), place: Place::default() });
+            let over = h.len().saturating_sub(HISTORY);
+            h.drain(..over);
+            self.hist_at.set(h.len() - 1);
+        }
+        if self.gallery.borrow().is_none() {
+            let tree_was = self.split.shows_sidebar();
+            *self.gallery.borrow_mut() = Some(Gallery { files: Vec::new(), tree_was });
+        }
+        self.split.set_show_sidebar(false);
+        self.close_find_quietly();
+        // The page on screen is the last file's until the gallery is drawn.
+        self.ready.set(false);
+        *self.current.borrow_mut() = None;
+        self.banner.set_revealed(false);
+        self.gone_label.set_visible(false);
+        self.changed.set_visible(false);
+        self.git_label.set_visible(false);
+        self.title.set_label("Gallery");
+        self.subtitle.set_label(&folder::tilde(&root));
+        self.window.set_title(Some(&format!("Gallery · {} — omamv", folder::file_name(&root))));
+        self.build_gallery();
+        self.web.grab_focus();
+        self.update_status();
+    }
+
+    /// Draw the gallery's cards again, off the main thread: on opening it,
+    /// and when a file changes while it shows.
+    fn build_gallery(&self) {
+        let Some(root) = self.root() else { return };
+        let files = self.scan.borrow().order.clone();
+        let at = self.gallery_at.get();
+        let palette = scheme::palette();
+        let width = crate::settings::get().width.px();
+        let (tx, rx) = async_channel::bounded(1);
+        let walk_root = root.clone();
+        std::thread::spawn(move || {
+            let cards = crate::gallery::newest(&walk_root, &files);
+            let sel = at.min(cards.len().saturating_sub(1));
+            let html = crate::gallery::page(&walk_root, &cards, sel, std::sync::Arc::new(files), &palette, width, std::time::SystemTime::now());
+            let _ = tx.send_blocking((cards, html));
+        });
+        let weak = self.weak();
+        glib::spawn_future_local(async move {
+            let Ok((cards, html)) = rx.recv().await else { return };
+            let Some(w) = weak.upgrade() else { return };
+            if w.root().as_deref() != Some(root.as_path()) {
+                return;
+            }
+            // Left the gallery meanwhile: nothing to draw.
+            match w.gallery.borrow_mut().as_mut() {
+                Some(g) => g.files = cards.clone(),
+                None => return,
+            }
+            w.gallery_at.set(w.gallery_at.get().min(cards.len().saturating_sub(1)));
+            let base = format!("omamv://{}/", w.host);
+            trace!("gallery: {} cards", cards.len());
+            w.ready.set(false);
+            *w.expect.borrow_mut() = base.clone();
+            w.web.load_html(&html, Some(&base));
+            w.update_status();
+        });
+    }
+
+    /// Highlight card `i`.
+    fn gallery_pick(&self, i: usize) {
+        self.gallery_at.set(i);
+        self.js(&format!("omamv.select({i})"));
+    }
+
+    /// Open the file on card `i`, if there is one.
+    fn gallery_open(&self, i: usize) {
+        let file = self.gallery.borrow().as_ref().and_then(|g| g.files.get(i).cloned());
+        if let Some(f) = file {
+            self.gallery_at.set(i);
+            self.open_file(&f, None, None, true);
+            self.web.grab_focus();
+        }
     }
 
     /// Ctrl+Shift+S: the whole page as one tall picture (ADR-0023), drawn by
@@ -1866,6 +2035,9 @@ impl Win {
         }
         if self.findbar.is_search_mode() {
             return Mode::Find;
+        }
+        if self.gallery.borrow().is_some() {
+            return Mode::Gallery;
         }
         if self.tree.has_focus() {
             return Mode::Tree;

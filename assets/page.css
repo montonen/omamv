@@ -113,3 +113,26 @@ dl.om-meta dd { margin: 0; overflow-wrap: anywhere; }
 
 /* The page as a picture (ADR-0023): no room left for scrolling past the end. */
 body.om-shot .page { padding-bottom: 32px; }
+
+/* The gallery (ADR-0024): five cards a row, two rows, the window full. */
+main.page:has(> .om-gallery) { max-width: none; padding: 0; }
+.om-gallery { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 12px; padding: 12px; height: 100vh; }
+.om-card { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-radius: 8px;
+  border: 1px solid var(--muted-60); background: var(--bg); color: var(--fg); text-decoration: none; }
+.om-card:hover, .om-card.om-sel { border-color: var(--accent); }
+/* The card's link lies over all of it: a page's own links stay inside. */
+.om-card-hit { position: absolute; inset: 0; z-index: 2; }
+.om-card.om-sel { box-shadow: 0 0 0 1px var(--accent); }
+.om-card-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px 0; font-size: 13px; color: var(--fg-bright); }
+.om-card-head kbd { flex: none; }
+.om-card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.om-card-age { flex: none; color: var(--fg-70); font-size: 12px; font-variant-numeric: tabular-nums; }
+.om-card-sub { padding: 2px 10px 8px; font-size: 12px; color: var(--fg-70); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border-bottom: 1px solid var(--muted-60); }
+.om-card-view { position: relative; flex: 1; min-height: 0; overflow: hidden; pointer-events: none; }
+.om-card-page { position: absolute; top: 0; left: 0; transform-origin: 0 0; padding: 22px 32px; }
+.om-card-page > :first-child { margin-top: 0; }
+.om-card-empty { border-style: dashed; opacity: .4; }
+figure.om-later { display: flex; align-items: center; justify-content: center; min-height: 120px; border: 1px dashed var(--muted);
+  border-radius: 8px; color: var(--fg-70); font-size: 14px; }

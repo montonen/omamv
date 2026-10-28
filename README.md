@@ -46,6 +46,7 @@ Press `?` in the window for all of them.
 | `j` `k` or `↓` `↑` · `d` `u` · `Space` · `g g` `G` | scroll |
 | `Ctrl+P` | open a file: newest first, with ages; type to find any |
 | `o` | outline: go to a heading |
+| `Ctrl+G` | the gallery: the ten newest files as rendered cards, `1`–`0` to open one |
 | `y` | copy the file's path |
 | `e` | open the file in your editor: Omarchy's by default, or the command set in Settings |
 | `Ctrl+Shift+S` | the whole page as one tall picture: saved under `~/Pictures/omamv` and copied |

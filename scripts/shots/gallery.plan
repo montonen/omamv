@@ -1,0 +1,10 @@
+# The gallery (ADR-0024) over the Omarchy manual.
+size 1440 900
+open manual/07-hotkeys.md
+key g ctrl
+wait 1200
+shot gallery
+key Right
+key Right
+wait 300
+shot gallery-picked

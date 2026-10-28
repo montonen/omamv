@@ -18,6 +18,8 @@ pub enum Mode {
     Start,
     Empty,
     Reading,
+    /// The gallery of the newest files (ADR-0024).
+    Gallery,
 }
 
 impl Mode {
@@ -49,6 +51,7 @@ impl Mode {
             Mode::Start => &[("1 9", "open a recent folder"), ("j k", "move"), ("Enter", "open"), ("Ctrl+O", "choose a folder"), ("?", "all keys")],
             Mode::Empty => &[("Ctrl+O", "choose a folder"), ("Ctrl+Shift+O", "recent folders"), ("?", "all keys")],
             Mode::Reading => &[],
+            Mode::Gallery => &[("1–0", "open a card"), ("← → ↑ ↓", "move"), ("Enter", "open"), ("Esc", "back"), ("?", "all keys")],
         }
     }
 }

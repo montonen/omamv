@@ -405,6 +405,54 @@ mod imp {
         r.check("  and omamv wrote nothing into the repository", std::fs::read_to_string(&arch).unwrap_or_default() == text, "");
         ready(&w).await;
 
+        // ---- the gallery of the ten newest (ADR-0024)
+        if let Ok(f) = std::fs::File::options().write(true).open(root.join("notes/todo.txt")) {
+            let _ = f.set_modified(std::time::SystemTime::now() + Duration::from_secs(60));
+        }
+        let before = current(&w);
+        ctrl(&w, gdk::Key::g);
+        let shown = wait_until(4_000, || w.keyboard_mode() == Mode::Gallery && w.ready.get()).await;
+        sleep(400).await;
+        let reading: usize = w.scan.borrow().order.iter().filter(|f| !crate::folder::is_html(f)).count().min(10);
+        let cards = js(&w, "[...document.querySelectorAll('.om-card-hit')].map(a => a.getAttribute('href')).join(' ')").await;
+        r.check("Ctrl+G shows the gallery, newest first", shown && cards.split(' ').count() == reading && cards.starts_with("/notes/todo.txt"), &cards);
+        r.check("  the tree steps aside, and the status bar has its keys", !w.split.shows_sidebar() && w.status.text().contains("open a card"), w.status.text());
+        let fit = js(&w, "(() => { const p = document.querySelector('.om-card-page'); const s = Number((p.style.transform.match(/scale\\(([0-9.]+)\\)/) || [])[1]); return String(s > 0.1 && s < 1 && Math.abs(p.getBoundingClientRect().width - p.parentElement.clientWidth) < 2); })()").await;
+        r.check("  each page scaled to its card's width", fit == "true", &fit);
+        let later = js(&w, "String(document.querySelectorAll('figure.om-later').length > 0 && !document.querySelector('pre.mermaid, figure.plantuml'))").await;
+        r.check("  diagrams wait for the page", later == "true", &later);
+        r.note("shot gallery", shot(&w, &shots.join("2c-gallery.png")).await);
+        let second = cards.split(' ').nth(1).map(|h| h.trim_start_matches('/').to_owned()).unwrap_or_default();
+        nav(&w, || {
+            press(&w, gdk::Key::_2);
+        })
+        .await;
+        r.check("2 opens the second card", current(&w) == second && w.split.shows_sidebar(), current(&w));
+        press(&w, gdk::Key::H);
+        let back = wait_until(4_000, || w.keyboard_mode() == Mode::Gallery && w.ready.get()).await;
+        let sel = js(&w, "String(document.querySelector('.om-card.om-sel')?.dataset.i)").await;
+        r.check("  H comes back to the gallery, that card picked", back && sel == "1", &sel);
+        // A file an agent writes while it shows takes the first card.
+        let fresh = root.join("notes/fresh.md");
+        let _ = std::fs::write(&fresh, "# Fresh\n");
+        if let Ok(f) = std::fs::File::options().write(true).open(&fresh) {
+            let _ = f.set_modified(std::time::SystemTime::now() + Duration::from_secs(120));
+        }
+        let mut first = String::new();
+        for _ in 0..40 {
+            sleep(100).await;
+            first = js(&w, "String(document.querySelector('.om-card-hit')?.getAttribute('href'))").await;
+            if first == "/notes/fresh.md" {
+                break;
+            }
+        }
+        r.check("  a file written meanwhile takes the first card", first == "/notes/fresh.md", &first);
+        let _ = std::fs::remove_file(&fresh);
+        press(&w, gdk::Key::Escape);
+        ready(&w).await;
+        r.check("Esc goes back to the file before the gallery", current(&w) == before && w.keyboard_mode() == Mode::Page, format!("{} {:?}", current(&w), w.keyboard_mode()));
+        wait_until(4_000, || !w.scan.borrow().order.iter().any(|f| f.ends_with("fresh.md"))).await;
+
         // ---- the page as one tall picture (ADR-0023)
         let pictures = report.parent().map(|d| d.join("pictures/omamv")).unwrap_or_default();
         nav(&w, || w.open_file(Path::new("README.md"), None, None, true)).await;

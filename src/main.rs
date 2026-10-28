@@ -3,6 +3,7 @@
 
 mod editor;
 mod folder;
+mod gallery;
 mod git;
 mod fuzzy;
 mod places;
