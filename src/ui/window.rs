@@ -25,6 +25,9 @@ use crate::scheme;
 
 static NEXT_HOST: AtomicU32 = AtomicU32::new(1);
 
+/// Visits kept for back and forward.
+const HISTORY: usize = 200;
+
 /// How long modifiers are held before their shortcuts show.
 pub const HELD_MS: u64 = 400;
 
@@ -592,6 +595,24 @@ impl Win {
             self.window.add_action(&action);
         }
 
+        // The mouse's back and forward buttons (by the thumb): the window
+        // takes them before the page, which would walk WebKit's own list.
+        let thumb = gtk::GestureClick::builder().button(0).propagation_phase(gtk::PropagationPhase::Capture).build();
+        let weak = self.weak();
+        thumb.connect_pressed(move |g, _, _, _| {
+            let Some(w) = weak.upgrade() else { return };
+            let dir = match g.current_button() {
+                8 => -1,
+                9 => 1,
+                _ => return,
+            };
+            g.set_state(gtk::EventSequenceState::Claimed);
+            if w.window.visible_dialog().is_none() {
+                w.go_back(dir);
+            }
+        });
+        self.window.add_controller(thumb);
+
         // The tree's edge: drag to resize, double-click for the usual width.
         let drag = gtk::GestureDrag::new();
         let weak = self.weak();
@@ -826,6 +847,8 @@ impl Win {
                     }
                 });
             }
+            "H" => self.go_back(-1),
+            "L" => self.go_back(1),
             "bracketright" | "J" => self.step_file(1),
             "bracketleft" | "K" => self.step_file(-1),
             "slash" => self.open_find(),
@@ -1135,6 +1158,9 @@ impl Win {
             let keep = if h.is_empty() { 0 } else { at + 1 };
             h.truncate(keep);
             h.push(Visit { file: file.to_path_buf(), place: Place::default() });
+            // A long day's reading: the oldest visits go first.
+            let over = h.len().saturating_sub(HISTORY);
+            h.drain(..over);
             self.hist_at.set(h.len() - 1);
         }
         *self.current.borrow_mut() = Some(file.to_path_buf());
@@ -1205,10 +1231,16 @@ impl Win {
         });
     }
 
-    fn go_back(&self, dir: i32) {
+    /// Back (`dir` -1) or forward (+1) through the files read in this
+    /// folder, each at the place it was left (ADR-0020).
+    pub fn go_back(&self, dir: i32) {
         let to = self.hist_at.get() as i64 + dir as i64;
         let len = self.history.borrow().len() as i64;
+        if self.current.borrow().is_none() || self.showing() != "doc" {
+            return;
+        }
         if to < 0 || to >= len {
+            self.status.note(if dir < 0 { "no earlier file in this folder" } else { "no later file" });
             return;
         }
         self.remember_place();

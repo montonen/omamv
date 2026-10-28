@@ -18,6 +18,8 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("Tab / Shift+Tab", "next / previous link"),
             ("Enter", "follow the link"),
             ("Alt+← / Alt+→", "back / forward"),
+            ("H / L", "back / forward"),
+            ("◂ / ▸", "back / forward: the mouse thumb buttons"),
             ("Ctrl++ / Ctrl+− / Ctrl+0", "text size"),
         ],
     ),

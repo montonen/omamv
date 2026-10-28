@@ -320,6 +320,14 @@ mod imp {
         key(&w, gdk::Key::Right, gdk::ModifierType::ALT_MASK);
         ready(&w).await;
         r.check("Alt+Right goes forward", current(&w) == "README.md", current(&w));
+        press(&w, gdk::Key::H);
+        ready(&w).await;
+        r.check("H goes back too (ADR-0020)", current(&w) == after, current(&w));
+        press(&w, gdk::Key::L);
+        ready(&w).await;
+        r.check("L goes forward", current(&w) == "README.md", current(&w));
+        press(&w, gdk::Key::L);
+        r.check("  at the newest, it says so", w.status.shown_note().as_deref() == Some("no later file") && current(&w) == "README.md", format!("{:?}", w.status.shown_note()));
 
         // ---- quick open
         // An agent rewrote this one just now: it comes first (ADR-0017).
