@@ -29,6 +29,8 @@ pub struct Change {
 pub struct Watch {
     watcher: notify::RecommendedWatcher,
     watched: HashSet<PathBuf>,
+    /// The open file's repository folder (`.git`), for its state (ADR-0022).
+    extra: Option<PathBuf>,
 }
 
 impl Watch {
@@ -43,11 +45,15 @@ impl Watch {
             }
         })
         .ok()?;
-        Some((Watch { watcher, watched: HashSet::new() }, rx))
+        Some((Watch { watcher, watched: HashSet::new(), extra: None }, rx))
     }
 
-    /// Watch exactly `dirs`: add the new ones, drop the gone ones.
+    /// Watch exactly `dirs`, and the extra folder: add the new ones, drop
+    /// the gone ones.
     pub fn follow(&mut self, dirs: &[PathBuf]) {
+        let mut dirs = dirs.to_vec();
+        dirs.extend(self.extra.clone());
+        let dirs = &dirs[..];
         let wanted: HashSet<&PathBuf> = dirs.iter().collect();
         let gone: Vec<PathBuf> = self.watched.iter().filter(|d| !wanted.contains(d)).cloned().collect();
         for d in gone {
@@ -58,6 +64,14 @@ impl Watch {
             if !self.watched.contains(d) && self.watcher.watch(d, RecursiveMode::NonRecursive).is_ok() {
                 self.watched.insert(d.clone());
             }
+        }
+    }
+
+    /// Watch `dir` as well as the scan's folders, in place of the last extra.
+    pub fn set_extra(&mut self, dir: Option<PathBuf>, dirs: &[PathBuf]) {
+        if self.extra != dir {
+            self.extra = dir;
+            self.follow(dirs);
         }
     }
 

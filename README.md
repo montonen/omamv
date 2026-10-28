@@ -62,6 +62,9 @@ folder opens, how fast it was read and drawn. A file that appears on disk
 (an agent's new report) is named there too. YAML front matter shows as a
 small block of facts above the text. Obsidian's `[[wikilinks]]` are links,
 found as Obsidian finds them; one to nothing in the folder is dimmed.
+In a git repository the header says the open file's state and its last
+commit ("modified · a1b2c3d 2 h ago"), read-only: omamv runs no git command
+and writes nothing into `.git`.
 
 A folder read before opens on the file read last there, where you left it
 (kept in omamv's own state, `~/.local/state/omamv/places`, never in the
@@ -73,7 +76,7 @@ Settings say so, on quick open with nothing shown until you pick.
 Arch / Omarchy:
 
 ```bash
-sudo pacman -S --needed rust webkitgtk-6.0 libadwaita
+sudo pacman -S --needed rust webkitgtk-6.0 libadwaita libgit2
 sudo pacman -S --needed plantuml   # optional: draws PlantUML diagrams
 scripts/install.sh
 ```

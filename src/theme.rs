@@ -322,6 +322,7 @@ headerbar.om-header button:hover { background: alpha(@om_fg, 0.08); }
 .om-title { font-weight: 700; color: @om_bright; }
 .om-subtitle { font-size: 0.86em; color: alpha(@om_fg, 0.7); }
 .om-changed { font-size: 0.86em; color: alpha(@om_fg, 0.7); }
+.om-git { font-size: 0.86em; color: alpha(@om_fg, 0.7); font-feature-settings: "tnum"; }
 .om-dot { color: @om_accent; }
 .om-gone { font-size: 0.86em; color: @om_red; }
 

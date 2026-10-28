@@ -57,6 +57,7 @@ macro_rules! trace {
 enum Timer {
     Reload,
     Rescan,
+    Git,
 }
 
 /// Where a reader was in a file: the heading above the top of the window and
@@ -115,6 +116,11 @@ pub struct Win {
     subtitle: gtk::Label,
     pub changed: gtk::Label,
     gone_label: gtk::Label,
+    /// The open file in git (ADR-0022).
+    pub git_label: gtk::Label,
+    /// Its repository's own folder, followed for commits and staging.
+    git_dir: RefCell<Option<PathBuf>>,
+    git_timer: RefCell<Option<glib::SourceId>>,
     pub banner: adw::Banner,
     pub status: Status,
     /// The settings this window last took (ADR-0014).
@@ -198,9 +204,12 @@ impl Win {
         changed.add_css_class("om-changed");
         let gone_label = gtk::Label::builder().label("gone").visible(false).build();
         gone_label.add_css_class("om-gone");
+        let git_label = gtk::Label::builder().visible(false).build();
+        git_label.add_css_class("om-git");
         let sub_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         sub_row.set_halign(gtk::Align::Center);
         sub_row.append(&subtitle);
+        sub_row.append(&git_label);
         sub_row.append(&changed);
         sub_row.append(&gone_label);
         let title_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -343,6 +352,9 @@ impl Win {
             subtitle,
             changed,
             gone_label,
+            git_label,
+            git_dir: RefCell::new(None),
+            git_timer: RefCell::new(None),
             banner,
             status,
             applied: RefCell::new(None),
@@ -995,6 +1007,7 @@ impl Win {
         self.history.borrow_mut().clear();
         self.hist_at.set(0);
         *self.current.borrow_mut() = None;
+        self.git_label.set_visible(false);
         *self.pending_open.borrow_mut() = file;
         self.opened_at.set(Some(std::time::Instant::now()));
         for slot in [&self.reload_timer, &self.rescan_timer] {
@@ -1125,6 +1138,7 @@ impl Win {
 
     /// A clean page and quick open: the reader names the file.
     fn pick_a_file(&self) {
+        self.git_label.set_visible(false);
         trace!("asking for a file by name");
         let body = r#"<div class="om-pick"><p>Open a file by name: <kbd>Ctrl</kbd>+<kbd>P</kbd></p><p>or pick one in the tree.</p></div>"#;
         self.web.load_html(&crate::render::wrap("omamv", body, &scheme::palette()), None);
@@ -1135,6 +1149,7 @@ impl Win {
     }
 
     fn empty_folder(&self) {
+        self.git_label.set_visible(false);
         trace!("nothing to show");
         self.set_gone(false);
         let s = crate::settings::get();
@@ -1195,6 +1210,45 @@ impl Win {
         self.changed.set_visible(false);
         self.tree.mark(Some(file));
         self.update_status();
+        self.refresh_git();
+    }
+
+    /// Look the open file up in git, off the main thread (ADR-0022).
+    pub fn refresh_git(&self) {
+        let (Some(root), Some(file)) = (self.root(), self.current.borrow().clone()) else {
+            self.git_label.set_visible(false);
+            return;
+        };
+        let (tx, rx) = async_channel::bounded(1);
+        let full = root.join(&file);
+        std::thread::spawn(move || {
+            let _ = tx.send_blocking(crate::git::look(&full));
+        });
+        let weak = self.weak();
+        glib::spawn_future_local(async move {
+            let Ok(look) = rx.recv().await else { return };
+            let Some(w) = weak.upgrade() else { return };
+            // Another file opened meanwhile: its own look is on the way.
+            if w.current.borrow().as_deref() != Some(file.as_path()) {
+                return;
+            }
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+            match &look {
+                Some(l) => {
+                    w.git_label.set_label(&crate::git::words(l, now));
+                    w.git_label.set_visible(true);
+                }
+                None => w.git_label.set_visible(false),
+            }
+            let dir = look.map(|l| l.git_dir);
+            if *w.git_dir.borrow() != dir {
+                *w.git_dir.borrow_mut() = dir.clone();
+                let dirs = w.scan.borrow().dirs.clone();
+                if let Some(watch) = w.watcher.borrow_mut().as_mut() {
+                    watch.set_extra(dir, &dirs);
+                }
+            }
+        });
     }
 
     fn load(&self, uri: &str) {
@@ -1336,6 +1390,11 @@ impl Win {
 
     fn on_change(&self, change: &crate::watch::Change) {
         let Some(root) = self.root() else { return };
+        // A commit, `git add`, a checkout: the file's state may have changed.
+        if self.git_dir.borrow().as_deref().is_some_and(|g| change.path.starts_with(g)) {
+            self.debounce(Timer::Git);
+            return;
+        }
         let current = self.current.borrow().as_ref().map(|c| root.join(c));
         if current.as_deref() == Some(change.path.as_path()) {
             self.debounce(Timer::Reload);
@@ -1349,6 +1408,7 @@ impl Win {
         let (slot, ms) = match which {
             Timer::Reload => (&self.reload_timer, 120),
             Timer::Rescan => (&self.rescan_timer, 300),
+            Timer::Git => (&self.git_timer, 250),
         };
         if let Some(id) = slot.borrow_mut().take() {
             id.remove();
@@ -1360,6 +1420,10 @@ impl Win {
                 Timer::Reload => {
                     w.reload_timer.borrow_mut().take();
                     w.current_changed();
+                }
+                Timer::Git => {
+                    w.git_timer.borrow_mut().take();
+                    w.refresh_git();
                 }
                 Timer::Rescan => {
                     w.rescan_timer.borrow_mut().take();
@@ -1377,6 +1441,7 @@ impl Win {
             self.set_gone(false);
             self.reload_keeping_place();
             self.show_changed();
+            self.refresh_git();
         } else {
             self.set_gone(true);
         }

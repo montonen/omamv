@@ -2,7 +2,7 @@
 
 pub mod debug;
 mod keys;
-mod quickopen;
+pub mod quickopen;
 mod settings;
 mod start;
 pub mod status;

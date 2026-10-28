@@ -3,6 +3,7 @@
 
 mod editor;
 mod folder;
+mod git;
 mod fuzzy;
 mod places;
 mod recent;

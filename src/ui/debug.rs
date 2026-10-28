@@ -383,6 +383,26 @@ mod imp {
         }
         press(&w, gdk::Key::y);
         r.check("y copies the file's path", w.status.shown_note().is_some_and(|n| n.starts_with("copied ") && n.ends_with("docs/architecture.md")), format!("{:?}", w.status.shown_note()));
+        // ---- the open file in git (ADR-0022), read-only
+        let git = |args: &[&str]| {
+            let _ = std::process::Command::new("git").arg("-C").arg(&root).args(args).output();
+        };
+        let label = || if w.git_label.is_visible() { w.git_label.label().to_string() } else { String::new() };
+        let shown = |want: fn(&str) -> bool| wait_until(3_000, move || want(&label()));
+        let clean = shown(|t| (t.ends_with(" ago") || t.ends_with(" just now")) && !t.contains("modified") && !t.contains("staged")).await;
+        r.check("a file in git shows its last commit", clean, label());
+        let arch = root.join("docs/architecture.md");
+        let text = std::fs::read_to_string(&arch).unwrap_or_default();
+        let _ = std::fs::write(&arch, format!("{text}\nOne more line.\n"));
+        r.check("  written: modified", shown(|t| t.starts_with("modified · ")).await, label());
+        git(&["add", "docs/architecture.md"]);
+        r.check("  git add: staged, seen through the repository's own folder", shown(|t| t.starts_with("staged · ")).await, label());
+        git(&["reset", "-q", "docs/architecture.md"]);
+        git(&["checkout", "-q", "--", "docs/architecture.md"]);
+        r.check("  put back: clean again", shown(|t| (t.ends_with(" ago") || t.ends_with(" just now")) && !t.contains("modified") && !t.contains("staged")).await, label());
+        r.check("  and omamv wrote nothing into the repository", std::fs::read_to_string(&arch).unwrap_or_default() == text, "");
+        ready(&w).await;
+
         // e: a stand-in editor that writes down what it was given, outside the folder.
         let handed = report.with_extension("edited");
         let mut s = crate::settings::get();

@@ -14,6 +14,7 @@ adw = { version = "0.9", package = "libadwaita", features = ["v1_5"] }
 ammonia = "4"
 async-channel = "2"
 base64 = "0.22"
+git2 = { version = "0.21", default-features = false }
 gtk = { version = "0.11", package = "gtk4", features = ["v4_12"] }
 ignore = "0.4"
 notify = "8"

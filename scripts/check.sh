@@ -19,6 +19,10 @@ chmod 700 "$work/runtime"
 cp -r tests/fixture "$work/fx"
 # Left out by the fixture's own .gitignore, so made here rather than committed.
 mkdir -p "$work/fx/build" && printf '# Ignored\n' > "$work/fx/build/ignored.md"
+# A repository of its own, one commit, for the file's git state (ADR-0022).
+git -C "$work/fx" init -q -b main
+git -C "$work/fx" add -A
+git -C "$work/fx" -c user.name=omamv -c user.email=check@omamv.invalid commit -q -m fixture
 theme="$work/state/omarchy/current"
 mkdir -p "$theme/theme"
 cat > "$theme/theme/colors.toml" <<'TOML'

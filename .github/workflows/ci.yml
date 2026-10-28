@@ -45,7 +45,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Install what the README says to install
-        run: pacman -Syu --noconfirm --needed gtk4 libadwaita webkitgtk-6.0 rust base-devel git
+        run: pacman -Syu --noconfirm --needed gtk4 libadwaita webkitgtk-6.0 libgit2 rust base-devel git
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Build
@@ -71,7 +71,7 @@ jobs:
       # gtk4 brings Broadway's daemon; a font so the page has text to lay out;
       # procps for pgrep, which the scripts use to find a free display.
       - name: Install what the README says to install, and what the checks need
-        run: pacman -Syu --noconfirm --needed gtk4 libadwaita webkitgtk-6.0 rust base-devel git ttf-dejavu procps-ng
+        run: pacman -Syu --noconfirm --needed gtk4 libadwaita webkitgtk-6.0 libgit2 rust base-devel git ttf-dejavu procps-ng
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Make the runtime directory
