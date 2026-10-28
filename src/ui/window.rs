@@ -25,6 +25,19 @@ use crate::scheme;
 
 static NEXT_HOST: AtomicU32 = AtomicU32::new(1);
 
+/// How long modifiers are held before their shortcuts show.
+pub const HELD_MS: u64 = 400;
+
+/// The modifier a key is, if it is one.
+fn modifier_of(key: gdk::Key) -> Option<gdk::ModifierType> {
+    match key {
+        gdk::Key::Control_L | gdk::Key::Control_R => Some(gdk::ModifierType::CONTROL_MASK),
+        gdk::Key::Shift_L | gdk::Key::Shift_R => Some(gdk::ModifierType::SHIFT_MASK),
+        gdk::Key::Alt_L | gdk::Key::Alt_R | gdk::Key::Meta_L | gdk::Key::Meta_R => Some(gdk::ModifierType::ALT_MASK),
+        _ => None,
+    }
+}
+
 /// `OMAMV_DEBUG=1`: each step of opening a folder and a page, on stderr.
 macro_rules! trace {
     ($($arg:tt)*) => {
@@ -125,6 +138,8 @@ pub struct Win {
     /// The next walk follows a change on disk: files new to it are named.
     from_disk: Cell<bool>,
     pending_g: Cell<bool>,
+    /// Shows the held modifiers' shortcuts once they have been held a moment.
+    held_timer: RefCell<Option<glib::SourceId>>,
     reload_timer: RefCell<Option<glib::SourceId>>,
     rescan_timer: RefCell<Option<glib::SourceId>>,
     changed_timer: RefCell<Option<glib::SourceId>>,
@@ -329,6 +344,7 @@ impl Win {
             gone: Cell::new(false),
             from_disk: Cell::new(false),
             pending_g: Cell::new(false),
+            held_timer: RefCell::new(None),
             reload_timer: RefCell::new(None),
             rescan_timer: RefCell::new(None),
             changed_timer: RefCell::new(None),
@@ -561,9 +577,29 @@ impl Win {
         let weak = self.weak();
         keys.connect_key_pressed(move |_, key, _, mods| {
             let Some(w) = weak.upgrade() else { return glib::Propagation::Proceed };
+            // The state given is from before this key: a modifier adds its own.
+            match modifier_of(key) {
+                Some(m) => w.modifiers(mods | m),
+                None => w.cancel_held(),
+            }
             if w.key(key, mods) { glib::Propagation::Stop } else { glib::Propagation::Proceed }
         });
+        let weak = self.weak();
+        keys.connect_key_released(move |_, key, _, mods| {
+            if let (Some(w), Some(m)) = (weak.upgrade(), modifier_of(key)) {
+                w.modifiers(mods - m);
+            }
+        });
         self.window.add_controller(keys);
+        // Keys let go elsewhere never reach the window: start clean on return.
+        let weak = self.weak();
+        self.window.connect_is_active_notify(move |win| {
+            if let Some(w) = weak.upgrade()
+                && !win.is_active()
+            {
+                w.modifiers(gdk::ModifierType::empty());
+            }
+        });
 
         // The status bar follows the keyboard.
         let weak = self.weak();
@@ -745,6 +781,49 @@ impl Win {
             _ => return false,
         }
         true
+    }
+
+    /// The modifiers now held. Ctrl or Alt held a moment (Shift adds to
+    /// them) lists their shortcuts in the status bar; a quick Ctrl+P never
+    /// gets that far.
+    pub fn modifiers(&self, mods: gdk::ModifierType) {
+        let mut parts = Vec::new();
+        if mods.contains(gdk::ModifierType::CONTROL_MASK) {
+            parts.push("Ctrl");
+        }
+        if mods.contains(gdk::ModifierType::SHIFT_MASK) {
+            parts.push("Shift");
+        }
+        if mods.contains(gdk::ModifierType::ALT_MASK) {
+            parts.push("Alt");
+        }
+        if let Some(id) = self.held_timer.borrow_mut().take() {
+            id.remove();
+        }
+        if !mods.intersects(gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK) {
+            self.status.hold(None);
+            return;
+        }
+        let prefix = parts.join("+");
+        // Already showing: follow at once (Shift added or let go).
+        if self.status.held().is_some() {
+            self.status.hold(Some(&prefix));
+            return;
+        }
+        let weak = self.weak();
+        *self.held_timer.borrow_mut() = Some(glib::timeout_add_local_once(Duration::from_millis(HELD_MS), move || {
+            if let Some(w) = weak.upgrade() {
+                w.held_timer.borrow_mut().take();
+                w.status.hold(Some(&prefix));
+            }
+        }));
+    }
+
+    /// Another key came: the modifiers are in use, not being asked about.
+    fn cancel_held(&self) {
+        if let Some(id) = self.held_timer.borrow_mut().take() {
+            id.remove();
+        }
     }
 
     // ------------------------------------------------------------ folders

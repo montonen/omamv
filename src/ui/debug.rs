@@ -247,6 +247,36 @@ mod imp {
         w.update_status();
         r.check("status bar: page keys", w.status.mode() == Some(Mode::Page) && w.status.text().contains("Ctrl+P"), w.status.text());
 
+        // ---- held modifiers list their shortcuts
+        let hold = |m: gdk::ModifierType| w.modifiers(m);
+        let wait = crate::ui::window::HELD_MS + 200;
+        hold(gdk::ModifierType::CONTROL_MASK);
+        sleep(100).await;
+        hold(gdk::ModifierType::empty());
+        sleep(wait).await;
+        r.check("a quick Ctrl tap leaves the bar alone", w.status.held().is_none() && w.status.text().contains("Ctrl+P"), w.status.text());
+        hold(gdk::ModifierType::CONTROL_MASK);
+        r.check("  not at once", w.status.held().is_none(), "");
+        sleep(wait).await;
+        r.check("Ctrl held lists its shortcuts", w.status.held().as_deref() == Some("Ctrl") && w.status.text().contains("P open a file") && !w.status.text().contains("j k"), w.status.text());
+        sleep(600).await;
+        r.note("shot ctrl held", shot(&w, &shots.join("1b-ctrl-held.png")).await);
+        hold(gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK);
+        r.check("  Shift added: Ctrl+Shift's", w.status.held().as_deref() == Some("Ctrl+Shift") && w.status.text() == "O recent folders", w.status.text());
+        hold(gdk::ModifierType::empty());
+        r.check("  let go: the page keys again", w.status.held().is_none() && w.status.text().contains("j k ↓ ↑ scroll"), w.status.text());
+        let mut s = crate::settings::get();
+        s.key_hints = false;
+        crate::settings::set(s);
+        super::super::apply_settings();
+        hold(gdk::ModifierType::ALT_MASK);
+        sleep(wait).await;
+        let shown = w.status.hints_shown() && w.status.text().contains("back / forward");
+        hold(gdk::ModifierType::empty());
+        r.check("  with key hints off too, and hidden again after", shown && !w.status.hints_shown(), w.status.text());
+        crate::settings::set(crate::settings::Settings::default());
+        super::super::apply_settings();
+
         // ---- reading keys
         for _ in 0..6 {
             press(&w, gdk::Key::j);

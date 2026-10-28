@@ -60,6 +60,11 @@ pub struct Status {
     /// place, until it times out.
     note: std::rc::Rc<std::cell::RefCell<Option<String>>>,
     last_place: std::rc::Rc<std::cell::RefCell<String>>,
+    /// Modifiers held ("Ctrl+Shift"): their shortcuts are shown in place of
+    /// the mode's hints until they are let go.
+    held: std::cell::RefCell<Option<(String, Vec<(String, String)>)>>,
+    /// Key hints on in Settings (ADR-0014).
+    hints_on: Cell<bool>,
 }
 
 impl Status {
@@ -68,11 +73,28 @@ impl Status {
         hints.set_hexpand(true);
         let place = gtk::Label::new(None);
         place.add_css_class("om-status-place");
+        // The hints may be cut at the right edge; they never make the window wider.
+        let clip = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::External)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .hexpand(true)
+            .child(&hints)
+            .build();
         let widget = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         widget.add_css_class("om-status");
-        widget.append(&hints);
+        widget.append(&clip);
         widget.append(&place);
-        Status { widget, hints, place, mode: Cell::new(None), note: Default::default(), last_place: Default::default() }
+        Status {
+            widget,
+            hints,
+            place,
+            mode: Cell::new(None),
+            note: Default::default(),
+            last_place: Default::default(),
+            held: Default::default(),
+            hints_on: Cell::new(true),
+        }
     }
 
     pub fn mode(&self) -> Option<Mode> {
@@ -88,13 +110,25 @@ impl Status {
             Some(note) => self.place.set_label(&format!("{note}   ·   {place}")),
             None => self.place.set_label(&place),
         }
-        if self.mode.replace(Some(mode)) == Some(mode) {
+        if self.mode.replace(Some(mode)) == Some(mode) || self.held.borrow().is_some() {
             return;
         }
+        self.fill(None, mode.hints().iter().map(|(k, w)| (*k, *w)));
+    }
+
+    fn fill<'a>(&self, prefix: Option<&str>, hints: impl Iterator<Item = (&'a str, &'a str)>) {
         while let Some(child) = self.hints.first_child() {
             self.hints.remove(&child);
         }
-        for (keys, what) in mode.hints() {
+        if let Some(prefix) = prefix {
+            // "Ctrl +": what is held, then what finishes it.
+            let lead = super::keys(prefix);
+            let plus = gtk::Label::new(Some("+"));
+            plus.add_css_class("om-plus");
+            lead.append(&plus);
+            self.hints.append(&lead);
+        }
+        for (keys, what) in hints {
             let hint = gtk::Box::new(gtk::Orientation::Horizontal, 6);
             let chips = gtk::Box::new(gtk::Orientation::Horizontal, 3);
             if keys.contains(' ') {
@@ -110,6 +144,37 @@ impl Status {
             hint.append(&label);
             self.hints.append(&hint);
         }
+    }
+
+    /// Modifiers held (`Some("Ctrl+Shift")`) or let go (`None`). Held, the
+    /// bar lists the shortcuts that start with them, also with key hints
+    /// off: holding them is asking.
+    pub fn hold(&self, prefix: Option<&str>) {
+        let list = prefix.map(|p| super::keys::held(&p.split('+').collect::<Vec<_>>())).filter(|l| !l.is_empty());
+        match (prefix, list) {
+            (Some(p), Some(list)) => {
+                if self.held.borrow().as_ref().is_some_and(|(q, _)| q == p) {
+                    return;
+                }
+                self.fill(Some(p), list.iter().map(|(k, w)| (k.as_str(), w.as_str())));
+                *self.held.borrow_mut() = Some((p.to_owned(), list));
+                self.hints.set_visible(true);
+            }
+            _ => {
+                if self.held.borrow_mut().take().is_none() {
+                    return;
+                }
+                if let Some(mode) = self.mode.get() {
+                    self.fill(None, mode.hints().iter().map(|(k, w)| (*k, *w)));
+                }
+                self.hints.set_visible(self.hints_on.get());
+            }
+        }
+    }
+
+    /// The modifiers whose shortcuts are showing.
+    pub fn held(&self) -> Option<String> {
+        self.held.borrow().as_ref().map(|(p, _)| p.clone())
     }
 
     /// Show `text` on the right for a few seconds.
@@ -134,7 +199,8 @@ impl Status {
 
     /// Key hints on or off (ADR-0014); the bar stays for the place and notes.
     pub fn show_hints(&self, on: bool) {
-        self.hints.set_visible(on);
+        self.hints_on.set(on);
+        self.hints.set_visible(on || self.held.borrow().is_some());
     }
 
     pub fn hints_shown(&self) -> bool {
@@ -143,6 +209,9 @@ impl Status {
 
     /// Every hint as text, for the checks.
     pub fn text(&self) -> String {
+        if let Some((_, list)) = self.held.borrow().as_ref() {
+            return list.iter().map(|(k, w)| format!("{k} {w}")).collect::<Vec<_>>().join(" · ");
+        }
         self.mode.get().map(|m| m.hints().iter().map(|(k, w)| format!("{k} {w}")).collect::<Vec<_>>().join(" · ")).unwrap_or_default()
     }
 }

@@ -54,6 +54,31 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
+/// The shortcuts that start with the modifiers held (`["Ctrl"]`,
+/// `["Ctrl", "Shift"]`): (the keys that finish them, what they do), in the
+/// overview's order. The status bar shows these while the modifiers are held.
+pub fn held(prefix: &[&str]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (_, rows) in KEYS {
+        for (spec, action) in *rows {
+            let alternatives: Vec<&str> = if *spec == "Ctrl+F / /" { vec!["Ctrl+F", "/"] } else { spec.split(" / ").collect() };
+            let finish: Vec<&str> = alternatives
+                .into_iter()
+                .filter_map(|alt| {
+                    let parts = combo_parts(alt);
+                    (parts.len() == prefix.len() + 1 && parts[..prefix.len()] == *prefix).then(|| parts[prefix.len()])
+                })
+                .collect();
+            if !finish.is_empty() {
+                // The bar's short form: "folder tree: focus, or hide" is "folder tree".
+                let short = action.split([':', ',']).next().unwrap_or(action).trim();
+                out.push((finish.join(" "), short.to_owned()));
+            }
+        }
+    }
+    out
+}
+
 /// The parts of one key or combo: `Ctrl++` is Ctrl and plus.
 fn combo_parts(alt: &str) -> Vec<&str> {
     if alt.len() > 1 && let Some(head) = alt.strip_suffix("++") {
@@ -140,7 +165,20 @@ pub fn dialog() -> adw::Dialog {
 
 #[cfg(test)]
 mod tests {
-    use super::combo_parts;
+    use super::{combo_parts, held};
+
+    #[test]
+    fn held_modifiers_list_their_shortcuts_only() {
+        let ctrl = held(&["Ctrl"]);
+        let has = |list: &[(String, String)], k: &str| list.iter().any(|(keys, _)| keys == k);
+        assert!(has(&ctrl, "P") && has(&ctrl, "B") && has(&ctrl, "F") && has(&ctrl, ","), "{ctrl:?}");
+        assert!(has(&ctrl, "+ − 0"), "{ctrl:?}");
+        assert!(ctrl.iter().any(|(k, a)| k == "O" && a == "open a folder") && ctrl.iter().all(|(_, a)| a != "recent folders"), "{ctrl:?}");
+        let ctrl_shift = held(&["Ctrl", "Shift"]);
+        assert_eq!(ctrl_shift, [("O".to_owned(), "recent folders".to_owned())]);
+        let alt = held(&["Alt"]);
+        assert_eq!(alt, [("← →".to_owned(), "back / forward".to_owned())]);
+    }
 
     #[test]
     fn plus_as_a_key() {
