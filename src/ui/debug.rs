@@ -461,6 +461,8 @@ mod imp {
         sleep(300).await;
         r.check("Ctrl+B twice hides the tree", !w.split.shows_sidebar(), "");
         ctrl(&w, gdk::Key::b);
+        sleep(300).await;
+        r.check("Ctrl+B with the tree hidden shows it and gives it the keyboard", w.split.shows_sidebar() && w.tree.has_focus() && w.keyboard_mode() == Mode::Tree, format!("{:?}", w.keyboard_mode()));
         press(&w, gdk::Key::Escape);
         sleep(100).await;
         r.check("Esc in the tree returns to the page", !w.tree.has_focus() && w.split.shows_sidebar(), "");
