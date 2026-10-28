@@ -51,6 +51,9 @@ impl Mode {
     }
 }
 
+/// (keys, what they do), built at run time.
+type Hints = Vec<(String, String)>;
+
 pub struct Status {
     pub widget: gtk::Box,
     hints: gtk::Box,
@@ -62,7 +65,7 @@ pub struct Status {
     last_place: std::rc::Rc<std::cell::RefCell<String>>,
     /// Modifiers held ("Ctrl+Shift"): their shortcuts are shown in place of
     /// the mode's hints until they are let go.
-    held: std::cell::RefCell<Option<(String, Vec<(String, String)>)>>,
+    held: std::cell::RefCell<Option<(String, Hints)>>,
     /// Key hints on in Settings (ADR-0014).
     hints_on: Cell<bool>,
 }
