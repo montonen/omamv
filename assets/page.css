@@ -107,3 +107,6 @@ dl.om-meta { display: grid; grid-template-columns: max-content 1fr; gap: 2px 16p
   padding: 0 0 12px; border-bottom: 1px solid var(--muted-60); font-size: 13.5px; color: var(--fg-70); }
 dl.om-meta dt { font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace; font-size: 12.5px; color: var(--fg-dark); }
 dl.om-meta dd { margin: 0; overflow-wrap: anywhere; }
+
+/* A [[wikilink]] to nothing in this folder (ADR-0018): its text, dimmed. */
+.om-wiki-missing { color: var(--fg-70); text-decoration: underline dotted var(--muted); text-underline-offset: 2px; cursor: help; }

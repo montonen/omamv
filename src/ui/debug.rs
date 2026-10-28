@@ -417,6 +417,20 @@ mod imp {
         sleep(300).await;
         let hash_y = js(&w, "String(window.scrollY > 0 || document.documentElement.scrollHeight <= innerHeight)").await;
         r.check("a link with #heading lands on it", current(&w) == "docs/other.md" && hash_y == "true", format!("{} {hash_y}", current(&w)));
+        // ---- wikilinks (ADR-0018)
+        let wiki = js(&w, "[...document.querySelectorAll('.page a')].map(a => a.getAttribute('href')).join(' ') + ' | ' + document.querySelectorAll('.om-wiki-missing').length + ' | ' + document.body.innerText.includes('[[')").await;
+        r.check(
+            "wikilinks are links: by name, to a heading elsewhere, on the page; a dead one is marked",
+            wiki.contains("/docs/architecture.md ") && wiki.contains("/README.md#open-a-folder") && wiki.contains("#second") && wiki.ends_with("| 1 | false"),
+            &wiki,
+        );
+        let page = w.web.clone();
+        nav(&w, move || page.evaluate_javascript("document.querySelector('a[href=\"/README.md#open-a-folder\"]').click()", None, None, gtk::gio::Cancellable::NONE, |_| {})).await;
+        sleep(300).await;
+        let y = js(&w, "String(Math.round(document.getElementById('open-a-folder').getBoundingClientRect().top))").await;
+        r.check("  a wikilink opens its file at the heading", current(&w) == "README.md" && y.parse::<i32>().is_ok_and(|t| (0..80).contains(&t)), format!("{} top {y}", current(&w)));
+        key(&w, gdk::Key::Left, gdk::ModifierType::ALT_MASK);
+        ready(&w).await;
         key(&w, gdk::Key::Left, gdk::ModifierType::ALT_MASK);
         ready(&w).await;
 

@@ -10,6 +10,7 @@ mod settings;
 mod theme;
 mod ui;
 mod watch;
+mod wiki;
 
 use std::io::IsTerminal;
 use std::path::PathBuf;

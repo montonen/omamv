@@ -21,6 +21,13 @@ const PAGE_CSS: &[u8] = include_bytes!("../assets/page.css");
 
 thread_local! {
     static ROOTS: RefCell<HashMap<String, PathBuf>> = RefCell::new(HashMap::new());
+    /// Each window's shown files, for resolving wikilinks (ADR-0018).
+    static FILES: RefCell<HashMap<String, Arc<Vec<PathBuf>>>> = RefCell::new(HashMap::new());
+}
+
+/// The files window `host` shows now, from its root.
+pub fn set_files(host: &str, files: Vec<PathBuf>) {
+    FILES.with(|f| f.borrow_mut().insert(host.to_owned(), Arc::new(files)));
 }
 
 fn palette_cell() -> &'static Mutex<Arc<Palette>> {
@@ -47,6 +54,7 @@ pub fn set_root(host: &str, root: Option<PathBuf>) {
         }
         None => {
             r.borrow_mut().remove(host);
+            FILES.with(|f| f.borrow_mut().remove(host));
         }
     });
 }
@@ -138,10 +146,12 @@ fn handle(req: &URISchemeRequest) {
     }
     if crate::folder::is_shown(&full) {
         let palette = palette();
+        let files = FILES.with(|f| f.borrow().get(&host).cloned()).unwrap_or_default();
+        let links = crate::wiki::Links { root: root.clone(), rel: rel.clone(), files };
         finish_later(req, "text/html", move || {
             let bytes = std::fs::read(&full)?;
             let text = String::from_utf8_lossy(&bytes);
-            Ok(crate::render::page(&full, &text, &palette).into_bytes())
+            Ok(crate::render::page(&full, &text, &palette, Some(&links)).into_bytes())
         });
         return;
     }

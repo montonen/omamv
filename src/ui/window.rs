@@ -1054,6 +1054,7 @@ impl Win {
             if from_disk {
                 w.name_new_files(&scan);
             }
+            scheme::set_files(&w.host, scan.order.clone());
             *w.scan.borrow_mut() = scan;
             if ask_now {
                 w.pick_a_file();

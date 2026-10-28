@@ -59,7 +59,8 @@ The status bar shows the keys that matter where the keyboard is (hold Ctrl or
 Alt for a moment to see their shortcuts), and, when a
 folder opens, how fast it was read and drawn. A file that appears on disk
 (an agent's new report) is named there too. YAML front matter shows as a
-small block of facts above the text.
+small block of facts above the text. Obsidian's `[[wikilinks]]` are links,
+found as Obsidian finds them; one to nothing in the folder is dimmed.
 
 A folder opens on its README (then an index, then its first file), or, if
 Settings say so, on quick open with nothing shown until you pick.

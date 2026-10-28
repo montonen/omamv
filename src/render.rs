@@ -11,17 +11,19 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use pulldown_cmark::{BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{BlockQuoteKind, CodeBlockKind, CowStr, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd};
+
+use crate::wiki::{self, Links};
 
 use crate::theme::{self, Palette};
 
 /// The page for a file's text.
-pub fn page(path: &Path, text: &str, palette: &Palette) -> String {
+pub fn page(path: &Path, text: &str, palette: &Palette, links: Option<&Links>) -> String {
     if crate::folder::is_html(path) {
         return html_page(text);
     }
     let body = if crate::folder::is_markdown(path) {
-        markdown(text, palette)
+        markdown_in(text, palette, links)
     } else {
         format!(r#"<pre class="plain">{}</pre>"#, esc(text))
     };
@@ -126,7 +128,85 @@ const OPTS: Options = Options::ENABLE_TABLES
     .union(Options::ENABLE_TASKLISTS)
     .union(Options::ENABLE_FOOTNOTES)
     .union(Options::ENABLE_GFM)
-    .union(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
+    .union(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS)
+    .union(Options::ENABLE_WIKILINKS);
+
+/// Wikilinks made into ordinary links and pictures (ADR-0018). One that
+/// points at nothing in the folder is a dimmed span, not a link.
+fn wikilinks<'a>(events: impl Iterator<Item = Event<'a>>, links: Option<&Links>, trusted: &mut Trusted) -> Vec<Event<'a>> {
+    /// Inside a wikilink: how it closes, and the label to show in place of
+    /// the target written (`None` once shown, or when `|text` is given).
+    struct Wiki {
+        close: Option<TagEnd>,
+        relabel: bool,
+        label: Option<String>,
+    }
+    let missing = |trusted: &mut Trusted, file: &str| {
+        Event::InlineHtml(trusted.token(format!(r#"<span class="om-wiki-missing" title="{} is not in this folder">"#, esc(file))).into())
+    };
+    let link = |href: String| Event::Start(Tag::Link { link_type: LinkType::Inline, dest_url: CowStr::from(href), title: "".into(), id: "".into() });
+    let mut out = Vec::new();
+    let mut inside: Option<Wiki> = None;
+    for ev in events {
+        match ev {
+            Event::Start(Tag::Link { link_type: LinkType::WikiLink { has_pothole }, dest_url, .. }) => {
+                let (file, heading) = wiki::split(&dest_url);
+                let found = if file.is_empty() { Some(None) } else { links.and_then(|l| wiki::resolve(file, l)).map(Some) };
+                let close = match found {
+                    Some(f) => {
+                        out.push(link(wiki::href(f.as_deref(), heading)));
+                        Some(TagEnd::Link)
+                    }
+                    None => {
+                        out.push(missing(trusted, file));
+                        None
+                    }
+                };
+                inside = Some(Wiki { close, relabel: !has_pothole, label: Some(wiki::label(&dest_url)) });
+            }
+            Event::Start(Tag::Image { link_type: LinkType::WikiLink { .. }, dest_url, .. }) => {
+                let target = dest_url.split('|').next().unwrap_or("").to_owned();
+                let (file, _) = wiki::split(&target);
+                let path = Path::new(file);
+                // `![[Note]]` puts a note inside another in Obsidian; here it is a link to it.
+                let note = crate::folder::is_shown(path) || path.extension().is_none();
+                let found = links.and_then(|l| if note { wiki::resolve(file, l) } else { wiki::picture(file, l) });
+                let close = match found {
+                    Some(f) if note => {
+                        out.push(link(wiki::href(Some(&f), None)));
+                        Some(TagEnd::Link)
+                    }
+                    Some(f) => {
+                        let href = CowStr::from(wiki::href(Some(&f), None));
+                        out.push(Event::Start(Tag::Image { link_type: LinkType::Inline, dest_url: href, title: "".into(), id: "".into() }));
+                        Some(TagEnd::Image)
+                    }
+                    None => {
+                        out.push(missing(trusted, file));
+                        None
+                    }
+                };
+                let label = if note { wiki::label(&target) } else { file.to_owned() };
+                inside = Some(Wiki { close, relabel: true, label: Some(label) });
+            }
+            Event::Text(t) => match inside.as_mut() {
+                Some(w) if w.relabel => {
+                    if let Some(l) = w.label.take() {
+                        out.push(Event::Text(l.into()));
+                    }
+                }
+                _ => out.push(Event::Text(t)),
+            },
+            Event::End(end @ (TagEnd::Link | TagEnd::Image)) => match inside.take() {
+                Some(Wiki { close: Some(c), .. }) => out.push(Event::End(c)),
+                Some(Wiki { close: None, .. }) => out.push(Event::InlineHtml(trusted.token("</span>".into()).into())),
+                None => out.push(Event::End(end)),
+            },
+            e => out.push(e),
+        }
+    }
+    out
+}
 
 /// A heading's text as its id is made from it.
 fn heading_text(events: &[Event]) -> String {
@@ -210,9 +290,16 @@ fn unquote(s: &str) -> String {
     s.to_owned()
 }
 
+#[cfg(test)]
 pub fn markdown(src: &str, palette: &Palette) -> String {
+    markdown_in(src, palette, None)
+}
+
+/// `links` resolves wikilinks to other files; without it only `[[#Heading]]` works.
+pub fn markdown_in(src: &str, palette: &Palette, links: Option<&Links>) -> String {
     let opts = OPTS;
     let mut trusted = Trusted::new(src);
+    let events = wikilinks(Parser::new_ext(src, opts), links, &mut trusted);
     let mut out: Vec<Event> = Vec::new();
     let mut code: Option<(String, String)> = None;
     let mut heading: Option<(HeadingLevel, Vec<Event>)> = None;
@@ -221,7 +308,7 @@ pub fn markdown(src: &str, palette: &Palette) -> String {
     let mut diagrams: Vec<(usize, String)> = Vec::new();
     let mut meta: Option<String> = None;
 
-    for ev in Parser::new_ext(src, opts) {
+    for ev in events {
         if let Some(body) = meta.as_mut() {
             match ev {
                 Event::Text(t) => body.push_str(&t),
@@ -569,9 +656,38 @@ impl Hash for Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn md(s: &str) -> String {
         markdown(s, &crate::theme::fallback(true))
+    }
+
+    #[test]
+    fn wikilinks_become_links_and_dead_ones_say_so() {
+        let links = Links {
+            root: PathBuf::from("/nowhere"),
+            rel: PathBuf::from("Project.md"),
+            files: std::sync::Arc::new(vec![PathBuf::from("Ideas.md"), PathBuf::from("Research/2026-10-28-01-a b.md")]),
+        };
+        let html = markdown_in(
+            "# Contents\n\n[[#Weather flavour]] [[Ideas#Top-down lake view]] [[Research/2026-10-28-01-a b|the note]] [[Gone]] [[Ideas]]\n\n## Weather flavour\n",
+            &crate::theme::fallback(true),
+            Some(&links),
+        );
+        assert!(html.contains(r##"<a href="#weather-flavour" rel="noreferrer">Weather flavour</a>"##), "{html}");
+        assert!(html.contains(r##"<a href="/Ideas.md#top-down-lake-view" rel="noreferrer">Ideas › Top-down lake view</a>"##), "{html}");
+        assert!(html.contains(r#"<a href="/Research/2026-10-28-01-a%20b.md" rel="noreferrer">the note</a>"#), "{html}");
+        assert!(html.contains(r#"<span class="om-wiki-missing" title="Gone is not in this folder">Gone</span>"#), "{html}");
+        assert!(html.contains(r#"<a href="/Ideas.md" rel="noreferrer">Ideas</a>"#), "{html}");
+        assert!(!html.contains("[["), "{html}");
+        // The heading a [[#link]] names has the id it points at.
+        assert!(html.contains(r#"id="weather-flavour""#), "{html}");
+    }
+
+    #[test]
+    fn a_wikilink_cannot_smuggle_markup() {
+        let html = md("[[\"><script>x</script>]] [[a|<b onclick=x>t</b>]]");
+        assert!(!html.contains("<script") && !html.contains("onclick"), "{html}");
     }
 
     #[test]
@@ -665,7 +781,7 @@ mod tests {
 
     #[test]
     fn plain_text_is_shown_as_it_is() {
-        let page = page(Path::new("notes.txt"), "a <b>\n  b", &crate::theme::fallback(true));
+        let page = page(Path::new("notes.txt"), "a <b>\n  b", &crate::theme::fallback(true), None);
         assert!(page.contains(r#"<pre class="plain">a &lt;b&gt;"#));
     }
 

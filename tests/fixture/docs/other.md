@@ -1,6 +1,6 @@
 # Other
 
-Text.
+Text. Wikilinks, as Obsidian writes them: [[architecture]], [[README#Open a folder|the folder table]], [[#Second]] and [[Not here]].
 
 ## First
 
