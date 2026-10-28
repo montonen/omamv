@@ -3,6 +3,7 @@
 
 mod folder;
 mod fuzzy;
+mod places;
 mod recent;
 mod render;
 mod scheme;

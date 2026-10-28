@@ -413,6 +413,9 @@ impl Win {
                 w.header.remove_css_class("om-scrolled");
             }
             trace!("page says {msg}");
+            if msg.contains("\"place\":") {
+                w.keep_place(Place::parse(&msg));
+            }
             if msg.contains("\"ready\":true") {
                 w.ready.set(true);
                 if w.gone.get() {
@@ -1049,7 +1052,10 @@ impl Win {
             // now or on a later walk; a file asked for still opens.
             let by_name = crate::settings::get().ask_on_open;
             let ask_now = first && asked.is_none() && by_name && !empty;
-            let pick = asked.or_else(|| if (first || nothing_open) && !by_name { folder::first_file(&scan) } else { None });
+            // A folder read before opens where the reader left it (ADR-0019).
+            let left = if first && asked.is_none() && !by_name { crate::places::get(&root).filter(|s| scan.order.contains(&s.file)) } else { None };
+            let place = left.as_ref().map(|s| Place { id: s.id.clone(), off: s.off, y: s.y });
+            let pick = asked.or_else(|| left.map(|s| s.file)).or_else(|| if (first || nothing_open) && !by_name { folder::first_file(&scan) } else { None });
             trace!("pick {pick:?}");
             if from_disk {
                 w.name_new_files(&scan);
@@ -1059,7 +1065,7 @@ impl Win {
             if ask_now {
                 w.pick_a_file();
             } else if let Some(f) = pick {
-                w.open_file(&f, None, None, true);
+                w.open_file(&f, None, place, true);
                 w.web.grab_focus();
             } else if empty {
                 w.empty_folder();
@@ -1132,6 +1138,8 @@ impl Win {
             self.hist_at.set(h.len() - 1);
         }
         *self.current.borrow_mut() = Some(file.to_path_buf());
+        let p = place.clone().unwrap_or_default();
+        crate::places::set(&root, &crate::places::Spot { file: file.to_path_buf(), id: p.id, off: p.off, y: p.y });
         // Back to a file removed since: it is shown as gone, not as an error.
         self.set_gone(!root.join(file).is_file());
         self.last_find_at.set(0);
@@ -1163,6 +1171,21 @@ impl Win {
     }
 
     /// Note where the reader is in the current file, for Alt+← later.
+    /// The page says where the reader stopped: kept for this visit and for
+    /// the folder (ADR-0019).
+    fn keep_place(&self, place: Place) {
+        let (Some(root), Some(file)) = (self.root(), self.current.borrow().clone()) else { return };
+        if !self.ready.get() {
+            return;
+        }
+        if let Some(visit) = self.history.borrow_mut().get_mut(self.hist_at.get())
+            && visit.file == file
+        {
+            visit.place = place.clone();
+        }
+        crate::places::set(&root, &crate::places::Spot { file, id: place.id, off: place.off, y: place.y });
+    }
+
     fn remember_place(&self) {
         // A page still loading would answer for the one before it.
         if !self.ready.get() {

@@ -92,7 +92,7 @@ pub fn dialog() -> adw::PreferencesDialog {
     let on_open = combo(
         "When a folder opens",
         "A file given on the command line always opens",
-        &["Show its first file", "Open a file by name"],
+        &["The file read last, or its first", "Open a file by name"],
         u32::from(s.ask_on_open),
     );
     on_open.connect_selected_notify(|row| {

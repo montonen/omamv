@@ -62,7 +62,9 @@ folder opens, how fast it was read and drawn. A file that appears on disk
 small block of facts above the text. Obsidian's `[[wikilinks]]` are links,
 found as Obsidian finds them; one to nothing in the folder is dimmed.
 
-A folder opens on its README (then an index, then its first file), or, if
+A folder read before opens on the file read last there, where you left it
+(kept in omamv's own state, `~/.local/state/omamv/places`, never in the
+folder). A new folder opens on its README (then an index, then its first file), or, if
 Settings say so, on quick open with nothing shown until you pick.
 
 ## Install

@@ -703,6 +703,23 @@ mod imp {
         crate::settings::set(crate::settings::Settings::default());
         super::super::apply_settings();
 
+        // ---- a folder remembers where the reader was (ADR-0019)
+        let entries = |d: &Path| {
+            let mut v: Vec<String> = std::fs::read_dir(d).map(|r| r.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+            v.sort();
+            v
+        };
+        let before = entries(&root);
+        nav(&w, || w.open_file(Path::new("docs/other.md"), None, None, true)).await;
+        w.js("document.getElementById('second').scrollIntoView({block:'start',behavior:'instant'})");
+        let kept = wait_until(3_000, || crate::places::get(&root).is_some_and(|s| s.file == Path::new("docs/other.md") && s.y > 0)).await;
+        let left_at = js(&w, "String(Math.round(window.scrollY))").await;
+        r.check("the file read and the place in it are kept for the folder", kept, format!("{:?}", crate::places::get(&root)));
+        r.check("  in omamv's own state, never in the folder", entries(&root) == before, format!("{:?}", entries(&root)));
+        w.open_folder(&root.join("notes"), None);
+        let fresh = wait_until(4_000, || current(&w) == "todo.txt").await;
+        r.check("a folder never read opens its first file", fresh, current(&w));
+
         // ---- "Open a file by name" when a folder opens (ADR-0014)
         let mut s = crate::settings::get();
         s.ask_on_open = true;
@@ -728,7 +745,10 @@ mod imp {
         r.note("shot empty", shot(&w, &shots.join("9-empty.png")).await);
         w.open_folder(&root, None);
         let back = wait_until(3_000, || w.showing() == "doc").await && ready(&w).await;
-        r.check("a folder with files shows its first one", back && current(&w) == "README.md", current(&w));
+        sleep(400).await;
+        let at = js(&w, "String(Math.round(window.scrollY))").await;
+        let same = at.parse::<i64>().ok().zip(left_at.parse::<i64>().ok()).is_some_and(|(a, b)| b > 0 && (a - b).abs() <= 4);
+        r.check("a folder read before opens on its last file, where it was left", back && current(&w) == "docs/other.md" && same, format!("{} at {at}, left at {left_at}", current(&w)));
 
         // ---- start screen
         ctrl(&w, gdk::Key::O);

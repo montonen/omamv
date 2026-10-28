@@ -147,6 +147,14 @@ function watchScroll() {
 }
 window.addEventListener("scroll", watchScroll, { passive: true });
 
+// Where the reader is, once scrolling stops: omamv keeps it for the folder
+// (ADR-0019), so a reopened folder starts at the same words.
+let settle = 0;
+window.addEventListener("scroll", () => {
+  clearTimeout(settle);
+  settle = setTimeout(() => tell({ place: JSON.parse(place()) }), 500);
+}, { passive: true });
+
 // ---- find ----
 
 let marks = [];
