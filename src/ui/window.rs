@@ -120,7 +120,7 @@ pub struct Win {
     /// The settings this window last took (ADR-0014).
     applied: RefCell<Option<crate::settings::Settings>>,
     pub split: adw::OverlaySplitView,
-    tree_handle: gtk::Box,
+    pub tree_handle: gtk::Box,
     /// The width a drag of the tree's edge started from.
     drag_from: Cell<f64>,
     pub tree: Rc<Tree>,
@@ -1098,6 +1098,10 @@ impl Win {
             } else if changed {
                 let cur = w.current.borrow().clone();
                 w.tree.mark(cur.as_deref());
+                // A file came or went: the page's [[wikilinks]] are found again (ADR-0018).
+                if cur.as_deref().is_some_and(folder::is_markdown) {
+                    w.reload_keeping_place();
+                }
             }
             w.update_status();
         });

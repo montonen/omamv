@@ -58,6 +58,9 @@ type Hints = Vec<(String, String)>;
 pub struct Status {
     pub widget: gtk::Box,
     hints: gtk::Box,
+    clip: gtk::ScrolledWindow,
+    /// Held shortcuts left out for want of room.
+    left_out: Cell<usize>,
     place: gtk::Label,
     mode: Cell<Option<Mode>>,
     /// A passing note on the right (the load time), in place of the file's
@@ -92,6 +95,8 @@ impl Status {
         Status {
             widget,
             hints,
+            clip,
+            left_out: Cell::new(0),
             place,
             mode: Cell::new(None),
             note: Default::default(),
@@ -163,6 +168,7 @@ impl Status {
                 self.fill(Some(p), list.iter().map(|(k, w)| (k.as_str(), w.as_str())));
                 *self.held.borrow_mut() = Some((p.to_owned(), list));
                 self.hints.set_visible(true);
+                self.fit();
             }
             _ => {
                 if self.held.borrow_mut().take().is_none() {
@@ -174,6 +180,46 @@ impl Status {
                 self.hints.set_visible(self.hints_on.get());
             }
         }
+    }
+
+    /// Held shortcuts that would run past the edge are left out, whole, and
+    /// a last chip says how many and where they all are (`?`).
+    fn fit(&self) {
+        self.left_out.set(0);
+        let room = self.clip.width();
+        if room <= 0 {
+            return;
+        }
+        // What the "+N more" chip at the end needs.
+        const MORE: i32 = 120;
+        let kids: Vec<gtk::Widget> = std::iter::successors(self.hints.first_child(), |c| c.next_sibling()).collect();
+        let mut x = 0;
+        let mut cut = None;
+        for (i, kid) in kids.iter().enumerate() {
+            let (_, natural, _, _) = kid.measure(gtk::Orientation::Horizontal, -1);
+            x += natural + if i > 0 { self.hints.spacing() } else { 0 };
+            let last = i + 1 == kids.len();
+            if x > room - if last { 0 } else { MORE } && i > 0 {
+                cut = Some(i);
+                break;
+            }
+        }
+        let Some(cut) = cut else { return };
+        for kid in &kids[cut..] {
+            self.hints.remove(kid);
+        }
+        self.left_out.set(kids.len() - cut);
+        let more = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        more.append(&super::kbd("?"));
+        let label = gtk::Label::new(Some(&format!("{} more", kids.len() - cut)));
+        label.add_css_class("om-status-label");
+        more.append(&label);
+        self.hints.append(&more);
+    }
+
+    /// Held shortcuts not shown for want of room (for the checks).
+    pub fn left_out(&self) -> usize {
+        self.left_out.get()
     }
 
     /// The modifiers whose shortcuts are showing.

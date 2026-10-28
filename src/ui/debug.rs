@@ -266,6 +266,7 @@ mod imp {
         r.check("Ctrl held lists its shortcuts", w.status.held().as_deref() == Some("Ctrl") && w.status.text().contains("P open a file") && !w.status.text().contains("j k"), w.status.text());
         sleep(600).await;
         r.note("shot ctrl held", shot(&w, &shots.join("1b-ctrl-held.png")).await);
+        r.check("  more than fits: whole ones shown, the rest counted", w.status.left_out() > 0, w.status.left_out());
         hold(gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK);
         r.check("  Shift added: Ctrl+Shift's", w.status.held().as_deref() == Some("Ctrl+Shift") && w.status.text() == "O recent folders", w.status.text());
         hold(gdk::ModifierType::empty());
@@ -437,6 +438,20 @@ mod imp {
             wiki.contains("/docs/architecture.md ") && wiki.contains("/README.md#open-a-folder") && wiki.contains("#second") && wiki.ends_with("| 1 | false"),
             &wiki,
         );
+        let note = root.join("notes/Not here.md");
+        let _ = std::fs::write(&note, "# Here now\n");
+        let mut alive = String::new();
+        for _ in 0..40 {
+            sleep(100).await;
+            alive = js(&w, "String(document.querySelectorAll('.om-wiki-missing').length + ' ' + !!document.querySelector('a[href=\"/notes/Not%20here.md\"]'))").await;
+            if alive == "0 true" {
+                break;
+            }
+        }
+        r.check("  a note made later brings its dead link to life", alive == "0 true", &alive);
+        let _ = std::fs::remove_file(&note);
+        wait_until(4_000, || !w.scan.borrow().order.iter().any(|f| f.ends_with("Not here.md"))).await;
+        ready(&w).await;
         let page = w.web.clone();
         nav(&w, move || page.evaluate_javascript("document.querySelector('a[href=\"/README.md#open-a-folder\"]').click()", None, None, gtk::gio::Cancellable::NONE, |_| {})).await;
         sleep(300).await;
@@ -512,6 +527,19 @@ mod imp {
         super::super::apply_settings();
         wait_until(2_000, || (396..=404).contains(&w.tree.widget.width())).await;
         let laid = w.tree.widget.width();
+        let mut l = crate::settings::get();
+        l.tree_left = true;
+        crate::settings::set(l);
+        super::super::apply_settings();
+        let at_edge = || w.tree_handle.halign() == gtk::Align::End && w.tree_handle.compute_bounds(&w.tree.widget).is_some_and(|b| (b.x() + b.width() - w.tree.widget.width() as f32).abs() < 2.0);
+        let edge = wait_until(2_000, at_edge).await;
+        let where_ = w.tree_handle.compute_bounds(&w.tree.widget).map(|b| format!("{:?} x {} w {} of {}", w.tree_handle.halign(), b.x(), b.width(), w.tree.widget.width()));
+        r.check("  on the left, the drag edge faces the page", edge, format!("{where_:?}"));
+        let mut l = crate::settings::get();
+        l.tree_left = false;
+        crate::settings::set(l);
+        super::super::apply_settings();
+        sleep(200).await;
         r.check("a width from Settings applies to the window", w.tree_width() == 400 && (396..=404).contains(&laid), format!("{} laid out {laid}", w.tree_width()));
         r.note("shot wide tree", shot(&w, &shots.join("3b-wide-tree.png")).await);
         crate::settings::set(crate::settings::Settings::default());
