@@ -1,9 +1,9 @@
 //! `omamv://`, where every page and picture comes from (ADR-0010).
 //!
 //! `omamv://assets/<name>` is omamv's own CSS and scripts. `omamv://w<N>/<path>`
-//! is a file in window N's folder: `.md` and `.txt` files are rendered off the
-//! main thread, anything else (pictures) is handed over as it is. Nothing
-//! outside the folder is served.
+//! is a file in window N's folder: the files omamv shows (`.md`, `.txt`, and
+//! `.html` when that is on) are rendered off the main thread, pictures and
+//! fonts are handed over as they are. Nothing outside the folder is served.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -95,9 +95,7 @@ pub fn parse(uri: &str) -> Option<(String, PathBuf, Option<String>)> {
 }
 
 fn not_found(req: &URISchemeRequest, why: &str) {
-    if std::env::var_os("OMAMV_DEBUG").is_some() {
-        eprintln!("omamv: {} not served: {why}", req.uri().unwrap_or_default());
-    }
+    trace!("{} not served: {why}", req.uri().unwrap_or_default());
     req.finish_error(&mut glib::Error::new(gio::IOErrorEnum::NotFound, why));
 }
 
@@ -191,6 +189,6 @@ mod tests {
     fn no_way_out_of_the_folder() {
         assert!(parse("omamv://w1/../etc/passwd").is_none());
         assert!(parse("omamv://w1/docs/%2e%2e/%2e%2e/x").is_none());
-        assert!(parse("omamv://w1//etc/passwd").is_some_and(|(_, r, _)| r == Path::new("etc/passwd")) || parse("omamv://w1//etc/passwd").is_none());
+        assert!(parse("omamv://w1//etc/passwd").is_none());
     }
 }

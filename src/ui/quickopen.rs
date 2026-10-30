@@ -169,6 +169,7 @@ impl QuickOpen {
     }
 
     /// The texts shown for a query (for the checks).
+    #[cfg(debug_assertions)]
     pub fn texts(&self, query: &str) -> Vec<String> {
         self.matches(query).into_iter().map(|(i, _)| self.items[i].text.clone()).collect()
     }

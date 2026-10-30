@@ -1,6 +1,6 @@
 # montonen.se's gallery picture (ADR-0024), over a copy of the Omarchy
 # manual's English pages whose times put ten well-known pages newest:
-#     ~/.cache/omarepos-shots/home/Work/omarchy-manual
+#     $OMAMV_SHOTS_HOME/Work/omarchy-manual
 size 1040 560
 open 07-hotkeys.md
 key g ctrl

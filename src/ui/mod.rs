@@ -41,7 +41,7 @@ pub(crate) fn forget(win: &Win) {
     WINDOWS.with(|w| w.borrow_mut().retain(|x| !std::ptr::eq(Rc::as_ptr(x), win)));
 }
 
-pub fn startup(app: &adw::Application) {
+pub fn startup(_app: &adw::Application) {
     crate::scheme::register(&webkit6::WebContext::default().expect("WebKit has a default context"));
     let provider = gtk::CssProvider::new();
     if let Some(display) = gdk::Display::default() {
@@ -56,7 +56,6 @@ pub fn startup(app: &adw::Application) {
             apply_theme(true);
         }
     });
-    let _ = app;
 }
 
 /// Read the palette and paint everything with it; `redraw` draws the open

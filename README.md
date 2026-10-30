@@ -1,77 +1,77 @@
 # omamv
 
-The Omarchy Markdown Viewer: open a folder, and every Markdown and text file
-in it is one key away, rendered. It only reads; editing is left to the editor
-beside it. It wears the active Omarchy theme and follows it live.
+A folder of Markdown, read like a book. A read-only, keyboard-first viewer for
+[Omarchy](https://omarchy.org): open a folder and every `.md` and `.txt` file
+in it is a few letters away, drawn in the active Omarchy theme.
+
+![omamv showing the Omarchy manual's hotkeys page, with the folder tree on the right](docs/omamv.png)
 
 ```bash
-omamv .            # the current folder
+omamv .            # this folder
 omamv docs/        # that folder
 omamv README.md    # its folder, with the file shown
 omamv              # recent folders
 ```
 
-Like `code .`, the command hands over to the window and gives the prompt back
-(`-w` keeps it in the terminal). One instance serves every window; a folder
-already open is brought forward.
+The command hands over to the window and gives the prompt back (`-w` keeps
+it). One instance serves every window; a folder already open comes forward.
 
-## What it shows
+## What it does
 
-- `.md` files rendered: GitHub's Markdown (tables, task lists, alerts,
-  footnotes), highlighted code, Mermaid and PlantUML diagrams in the theme's
-  colours. A diagram that cannot be drawn shows as code, with the reason.
-- `.txt` files as they are.
-- `.html` pages, such as reports from scans and jobs, when turned on in
-  Settings (off by default): as their author made them, their own styles and
-  pictures, but their scripts do not run and nothing loads from the network.
-- A folder tree, right or left, with only the folders that hold such files,
-  closed but for the way to the open file. Hidden folders and anything
-  `.gitignore` leaves out are skipped (both are settings).
+- **Markdown as GitHub draws it**: tables, task lists, alerts, footnotes,
+  highlighted code, and Mermaid and PlantUML diagrams in the theme's colours.
+  `.txt` as it is.
+- **Obsidian vaults**: `[[wikilinks]]` are links, found the way Obsidian finds
+  them; YAML front matter is a small block of facts.
+- **HTML reports** (off until turned on in Settings): as their author made
+  them, without their scripts.
+- **The folder beside the page**: only folders with something to read, and
+  what `.gitignore` leaves out left out.
+- **Follows the disk**: a saved file is drawn again where you were reading; a
+  new one is named in the status bar.
+- **The newest first**: `Ctrl+P` lists every file with its age; `Ctrl+G` shows
+  the ten newest as rendered cards, `1`–`0` to open one.
+- **Remembers**: a folder opens on the file you read last there, at the same
+  heading; back and forward step through what you read.
+- **Its place in git**: the header says if the file is modified, staged or
+  new, and its last commit.
 
-When the open file changes on disk the page is drawn again at the same
-heading; files added or removed appear in the tree by themselves. A removed
-file stays on screen, faded, until you pick another.
+![The gallery: the ten newest pages of a folder, drawn small](docs/omamv-gallery.png)
 
-Scripts in a document never run. Nothing is fetched to draw a page except
-pictures a document links from the web, and that can be turned off. A link to
-a file omamv does not show opens nothing. PlantUML runs in its sandbox, so a
-diagram cannot read other files.
+## Careful by design
+
+omamv opens folders it did not write, so what it does to them fits in a
+sentence: it reads them.
+
+- It never writes into a folder it shows. Its settings and memory live in
+  `~/.config/omamv` and `~/.local/state/omamv`.
+- No script in a document or report runs, and nothing a page does can start a
+  program or open a browser. Only a link you click is followed.
+- Nothing loads from the network but pictures a document links to, and that
+  is a setting.
+- Git is read with libgit2; no git command runs. PlantUML runs in its sandbox.
+- `e` hands the file to your editor (Omarchy's, or the one you set); that is
+  the only program omamv starts, and only on that key.
 
 ## Keys
 
-Press `?` in the window for all of them.
+`?` in the window lists them all; the status bar shows the ones that matter
+where you are, and holding `Ctrl` shows what it does.
 
 | Keys | |
 | --- | --- |
-| `j` `k` or `↓` `↑` · `d` `u` · `Space` · `g g` `G` | scroll |
-| `Ctrl+P` | open a file: newest first, with ages; type to find any |
+| `j` `k` · `d` `u` · `Space` · `g g` `G` | scroll |
+| `Ctrl+P` | open a file, the newest first |
+| `Ctrl+G` | the gallery of the ten newest, `1`–`0` to open |
+| `]` `[` | next / previous file |
+| `H` `L` · `Alt+←` `Alt+→` · mouse thumb buttons | back / forward, each at its place |
 | `o` | outline: go to a heading |
-| `Ctrl+G` | the gallery: the ten newest files as rendered cards, `1`–`0` to open one |
-| `y` | copy the file's path |
-| `e` | open the file in your editor: Omarchy's by default, or the command set in Settings |
-| `Ctrl+Shift+S` | the whole page as one tall picture: saved under `~/Pictures/omamv` and copied |
-| `]` `[` or `J` `K` | next / previous file |
-| `Ctrl+B` | folder tree: focus, or hide (`j k h l`, arrows, `Enter`, `Esc` inside) |
-| `<` `>` | folder tree narrower / wider (or drag its edge) |
-| `Ctrl+F` or `/` · `n` `N` | find |
-| `Alt+←` `Alt+→` · `H` `L` · mouse thumb buttons | back / forward through the files read, each at its place |
+| `/` or `Ctrl+F` · `n` `N` | find |
+| `Ctrl+B` · `<` `>` | folder tree: focus or hide · narrower / wider |
+| `e` · `y` | open in your editor · copy the file's path |
+| `Ctrl+Shift+S` | the whole page as one tall picture, saved and copied |
 | `Ctrl+O` · `Ctrl+Shift+O` | open a folder · recent folders |
 | `Ctrl+,` | settings |
-
-The status bar shows the keys that matter where the keyboard is (hold Ctrl or
-Alt for a moment to see their shortcuts), and, when a
-folder opens, how fast it was read and drawn. A file that appears on disk
-(an agent's new report) is named there too. YAML front matter shows as a
-small block of facts above the text. Obsidian's `[[wikilinks]]` are links,
-found as Obsidian finds them; one to nothing in the folder is dimmed.
-In a git repository the header says the open file's state and its last
-commit ("modified · a1b2c3d 2 h ago"), read-only: omamv runs no git command
-and writes nothing into `.git`.
-
-A folder read before opens on the file read last there, where you left it
-(kept in omamv's own state, `~/.local/state/omamv/places`, never in the
-folder). A new folder opens on its README (then an index, then its first file), or, if
-Settings say so, on quick open with nothing shown until you pick.
 
 ## Install
 
@@ -83,25 +83,24 @@ sudo pacman -S --needed plantuml   # optional: draws PlantUML diagrams
 scripts/install.sh
 ```
 
-The script builds a release, links the binary into `~/.local/bin` (where the
-Hyprland session looks), and installs the desktop entry and icon.
+`install.sh` builds a release, links it into `~/.local/bin` (where the
+Hyprland session looks) and installs the desktop entry and icon.
 
 ## Development
 
 ```bash
 cargo test           # unit tests
-scripts/smoke.sh     # the basics: the real binary started as a person would
-scripts/check.sh     # the whole app, offscreen on GTK's Broadway display (runs smoke.sh too)
+scripts/check.sh     # the whole app offscreen on GTK's Broadway display, then smoke.sh
+scripts/smoke.sh     # the real binary, started as a person would
 ```
 
-`OMAMV_DEBUG=1 omamv -w .` prints each step of opening a folder and a page.
-
-`scripts/check.sh` runs a debug build through every key path, edits and
-removes files in a copy of `tests/fixture`, switches the theme, and writes a
-report with pictures to `target/check/`. It never touches the desktop.
-
-Mermaid 11.12.0 is bundled in `assets/` (MIT, `assets/MERMAID-LICENSE`).
+`check.sh` drives a debug build through every key path in a copy of
+`tests/fixture`: it edits and removes files, switches the theme, and writes a
+report with pictures to `target/check/`. It never touches your desktop. CI
+runs the same in an Arch container. `OMAMV_DEBUG=1 omamv -w .` prints each
+step of opening a folder and a page.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). Mermaid 11.12.0 is bundled in `assets/` (MIT,
+[assets/MERMAID-LICENSE](assets/MERMAID-LICENSE)).

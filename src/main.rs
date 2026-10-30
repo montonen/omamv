@@ -1,6 +1,15 @@
 //! omamv — the Omarchy Markdown Viewer: a read-only, keyboard-first viewer
 //! for a folder of Markdown and text files.
 
+/// `OMAMV_DEBUG=1`: each step of opening a folder and a page, on stderr.
+macro_rules! trace {
+    ($($arg:tt)*) => {
+        if std::env::var_os("OMAMV_DEBUG").is_some() {
+            eprintln!("omamv: {}", format!($($arg)*));
+        }
+    };
+}
+
 mod editor;
 mod folder;
 mod gallery;

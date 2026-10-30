@@ -320,6 +320,7 @@ impl Tree {
     }
 
     /// The row showing `name` (for checks).
+    #[cfg(debug_assertions)]
     pub fn position_of(&self, name: &str) -> Option<u32> {
         let mut i = 0;
         while let Some(row) = self.row(i) {
@@ -350,16 +351,19 @@ impl Tree {
     }
 
     /// The left-out line, if shown (for the checks).
+    #[cfg(debug_assertions)]
     pub fn left_out_text(&self) -> Option<String> {
         self.left_out.is_visible().then(|| self.left_out.child().and_downcast::<gtk::Label>().map(|l| l.label().to_string())).flatten()
     }
 
     /// Where the cursor is.
+    #[cfg(debug_assertions)]
     pub fn cursor(&self) -> u32 {
         self.cursor.get()
     }
 
     /// The name on the row the cursor is drawn on, if one is (for checks).
+    #[cfg(debug_assertions)]
     pub fn cursor_label(&self) -> Option<String> {
         self.items.borrow().iter().filter_map(|w| w.upgrade()).find_map(|item| {
             let row = item.child()?;

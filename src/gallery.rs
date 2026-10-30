@@ -19,13 +19,8 @@ const READ_AT_MOST: u64 = 256 * 1024;
 /// The `.md` and `.txt` files among `files` (from `root`), newest on disk
 /// first, at most `CARDS`; the tree's order among equals.
 pub fn newest(root: &Path, files: &[PathBuf]) -> Vec<PathBuf> {
-    let mut dated: Vec<(Option<SystemTime>, &PathBuf)> = files
-        .iter()
-        .filter(|f| !crate::folder::is_html(f))
-        .map(|f| (root.join(f).metadata().and_then(|m| m.modified()).ok(), f))
-        .collect();
-    dated.sort_by_key(|d| std::cmp::Reverse(d.0));
-    dated.into_iter().take(CARDS).map(|(_, f)| f.clone()).collect()
+    let reading = files.iter().filter(|f| !crate::folder::is_html(f)).cloned();
+    crate::folder::by_age(root, reading).into_iter().take(CARDS).map(|(_, f)| f).collect()
 }
 
 /// The key that opens card `i` (0-based): 1 … 9, then 0.

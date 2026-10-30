@@ -8,7 +8,8 @@
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::os::unix::fs::DirBuilderExt;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use pulldown_cmark::{BlockQuoteKind, CodeBlockKind, CowStr, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd};
@@ -69,7 +70,7 @@ pub fn html_page(text: &str) -> String {
         html_policy()
     );
     // After a leading doctype, so the page keeps its standards mode.
-    let lower = text.get(..text.len().min(512)).unwrap_or("").to_ascii_lowercase();
+    let lower = text[..text.floor_char_boundary(512)].to_ascii_lowercase();
     let at = if lower.trim_start().starts_with("<!doctype") {
         lower.find('>').map(|i| i + 1).unwrap_or(0)
     } else {
@@ -424,7 +425,7 @@ fn markdown_with(src: &str, palette: &Palette, links: Option<&Links>, preview: O
     }
     let mut html = String::with_capacity(src.len() * 2);
     pulldown_cmark::html::push_html(&mut html, out.into_iter());
-    trusted.put_back(clean(&html, &trusted.nonce))
+    trusted.put_back(clean(&html))
 }
 
 /// A picture's address relative to its file, not absolute, a scheme or data.
@@ -433,10 +434,9 @@ fn local(dest: &str) -> bool {
 }
 
 /// Raw HTML in a document keeps its structure and loses anything that runs.
-/// `nonce` is the page's own: an attribute that carries one of omamv's
-/// tokens is dropped, so a piece is only ever put back as content.
-fn clean(html: &str, nonce: &str) -> String {
-    let _ = nonce;
+/// An attribute that carries anything like one of omamv's tokens is dropped,
+/// so a piece is only ever put back as content.
+fn clean(html: &str) -> String {
     static CLEANER: OnceLock<ammonia::Builder<'static>> = OnceLock::new();
     CLEANER
         .get_or_init(|| {
@@ -544,6 +544,18 @@ pub fn highlight(lang: &str, code: &str) -> String {
     format!("<pre><code>{}</code></pre>", generator.finalize())
 }
 
+/// A folder of omamv's own with nothing in it, for PlantUML to run from: a
+/// relative `!include` finds nothing there. Made once, readable by no one else.
+fn empty_dir() -> PathBuf {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("omamv-plantuml-{}", std::process::id()));
+        let _ = std::fs::DirBuilder::new().mode(0o700).create(&dir);
+        dir
+    })
+    .clone()
+}
+
 /// PlantUML through the local `plantuml` command, coloured by the palette.
 /// Every diagram on a page goes to one run (its Java takes a quarter of a
 /// second to start), and what was drawn is kept for as long as omamv runs.
@@ -629,7 +641,7 @@ note {{\n BackgroundColor {raised}\n LineColor {muted}\n}}\nlifeLine {{\n LineCo
         .args(["-tsvg", "-pipe", "-charset", "UTF-8", "-nometadata", "-pipedelimitor", SPLIT])
         .env("PLANTUML_SECURITY_PROFILE", "SANDBOX")
         .env_remove("JAVA_TOOL_OPTIONS")
-        .current_dir(std::env::temp_dir())
+        .current_dir(empty_dir())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

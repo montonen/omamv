@@ -1,5 +1,5 @@
 # montonen.se's pictures of omamv, over the Omarchy repository's own manual.
-#     scripts/shots.sh ~/.cache/omarepos-shots/home/Work/omarchy scripts/shots/site.plan <theme>/colors.toml <out>
+#     scripts/shots.sh $OMAMV_SHOTS_HOME/Work/omarchy scripts/shots/site.plan <theme>/colors.toml <out>
 size 1040 560
 tree 300
 

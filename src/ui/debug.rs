@@ -525,6 +525,15 @@ mod imp {
         let page = w.web.clone();
         nav(&w, move || page.evaluate_javascript("document.querySelector('a[href*=\"README\"]').click()", None, None, gtk::gio::Cancellable::NONE, |_| {})).await;
         r.check("a link from it to Markdown opens here", current(&w) == "README.md", current(&w));
+        // A page that moves by itself is not a click: it stays (and a web
+        // address in its place would never reach the desktop's browser).
+        let refresh = root.join("docs/refresh.html");
+        let _ = std::fs::write(&refresh, r#"<!doctype html><meta http-equiv="refresh" content="0;url=../README.md"><h1>Stays</h1>"#);
+        nav(&w, || w.open_file(Path::new("docs/refresh.html"), None, None, true)).await;
+        sleep(1_500).await;
+        let stayed = js(&w, "String(document.querySelector('h1')?.textContent)").await;
+        r.check("  a page that moves by itself goes nowhere", current(&w) == "docs/refresh.html" && stayed == "Stays", format!("{} {stayed}", current(&w)));
+        let _ = std::fs::remove_file(&refresh);
         crate::settings::set(crate::settings::Settings::default());
         super::super::apply_settings();
         let unlisted = wait_until(3_000, || !w.scan.borrow().order.contains(&html_page)).await;

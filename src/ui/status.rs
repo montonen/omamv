@@ -114,6 +114,7 @@ impl Status {
         }
     }
 
+    #[cfg(debug_assertions)]
     pub fn mode(&self) -> Option<Mode> {
         self.mode.get()
     }
@@ -244,6 +245,7 @@ impl Status {
     }
 
     /// Held shortcuts not shown for want of room (for the checks).
+    #[cfg(debug_assertions)]
     pub fn left_out(&self) -> usize {
         self.left_out.get()
     }
@@ -274,6 +276,7 @@ impl Status {
     }
 
     /// The note on the right, if one is showing (for the checks).
+    #[cfg(debug_assertions)]
     pub fn shown_note(&self) -> Option<String> {
         self.note.borrow().clone()
     }
@@ -284,11 +287,13 @@ impl Status {
         self.hints.set_visible(on || self.held.borrow().is_some());
     }
 
+    #[cfg(debug_assertions)]
     pub fn hints_shown(&self) -> bool {
         self.hints.is_visible()
     }
 
     /// Every hint as text, for the checks.
+    #[cfg(debug_assertions)]
     pub fn text(&self) -> String {
         if let Some((_, list)) = self.held.borrow().as_ref() {
             return list.iter().map(|(k, w)| format!("{k} {w}")).collect::<Vec<_>>().join(" · ");

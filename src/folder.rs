@@ -197,6 +197,15 @@ pub fn flatten(dir: &Dir, out: &mut Vec<PathBuf>) {
     out.extend(dir.files.iter().cloned());
 }
 
+/// `files` (from `root`) with the time each was last written, the newest
+/// first; the given order among equals. Read now, not at the scan: a file
+/// rewritten since counts as new (quick open and the gallery, ADR-0017/0024).
+pub fn by_age(root: &Path, files: impl IntoIterator<Item = PathBuf>) -> Vec<(Option<std::time::SystemTime>, PathBuf)> {
+    let mut dated: Vec<_> = files.into_iter().map(|f| (root.join(&f).metadata().and_then(|m| m.modified()).ok(), f)).collect();
+    dated.sort_by_key(|d| std::cmp::Reverse(d.0));
+    dated
+}
+
 pub fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())

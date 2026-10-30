@@ -1,5 +1,5 @@
 //! The settings dialog (ADR-0014): libadwaita's preferences dialog, as in
-//! omarepos and omabus. A change applies at once; there is nothing to save.
+//! other Omarchy apps. A change applies at once; there is nothing to save.
 
 use adw::prelude::*;
 

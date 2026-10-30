@@ -44,15 +44,6 @@ fn modifier_of(key: gdk::Key) -> Option<gdk::ModifierType> {
     }
 }
 
-/// `OMAMV_DEBUG=1`: each step of opening a folder and a page, on stderr.
-macro_rules! trace {
-    ($($arg:tt)*) => {
-        if std::env::var_os("OMAMV_DEBUG").is_some() {
-            eprintln!("omamv: {}", format!($($arg)*));
-        }
-    };
-}
-
 #[derive(Clone, Copy)]
 enum Timer {
     Reload,
@@ -103,8 +94,10 @@ impl Place {
     }
 }
 
+/// A stop in back and forward (ADR-0020).
 #[derive(Clone, Debug)]
 struct Visit {
+    /// From the folder's root; empty for the gallery (ADR-0024).
     file: PathBuf,
     place: Place,
 }
@@ -134,6 +127,8 @@ pub struct Win {
     /// The card highlighted, kept for a return to the gallery.
     gallery_at: Cell<usize>,
     gallery_timer: RefCell<Option<glib::SourceId>>,
+    /// Gallery builds started: only the newest one is drawn.
+    gallery_gen: Cell<u64>,
     pub banner: adw::Banner,
     pub status: Status,
     /// The settings this window last took (ADR-0014).
@@ -371,6 +366,7 @@ impl Win {
             gallery: RefCell::new(None),
             gallery_at: Cell::new(0),
             gallery_timer: RefCell::new(None),
+            gallery_gen: Cell::new(0),
             banner,
             status,
             applied: RefCell::new(None),
@@ -521,9 +517,16 @@ impl Win {
             {
                 return false;
             }
-            trace!("  treated as a link");
             decision.ignore();
-            w.follow(&uri);
+            // Only a click is a link. A page that moves by itself (a meta
+            // refresh in an HTML report, a script) goes nowhere: it must not
+            // get the desktop to open a browser, or reload itself forever.
+            if action.navigation_type() == webkit6::NavigationType::LinkClicked {
+                trace!("  treated as a link");
+                w.follow(&uri);
+            } else {
+                trace!("  not a click: ignored");
+            }
             true
         });
         // A viewer has no verbs to offer; Ctrl+C copies.
@@ -1112,7 +1115,6 @@ impl Win {
         self.rescan(true);
     }
 
-    /// Walk the folder again, off the main thread.
     /// Walk the folder again, off the main thread. The tree is rebuilt only
     /// when what it shows changed.
     fn rescan(&self, first: bool) {
@@ -1234,7 +1236,8 @@ impl Win {
             (true, false) => "",
         };
         self.empty_page.set_description(Some(&format!(
-            "omamv shows .md and .txt files, in this folder and the folders below it.{skipped}"
+            "omamv shows {kinds}, in this folder and the folders below it.{skipped}",
+            kinds = if s.html { ".md, .txt and .html files" } else { ".md and .txt files" }
         )));
         self.title.set_label(&self.root().map(|r| folder::file_name(&r)).unwrap_or_default());
         *self.current.borrow_mut() = None;
@@ -1257,16 +1260,7 @@ impl Win {
             }
         }
         if record {
-            self.remember_place();
-            let mut h = self.history.borrow_mut();
-            let at = self.hist_at.get();
-            let keep = if h.is_empty() { 0 } else { at + 1 };
-            h.truncate(keep);
-            h.push(Visit { file: file.to_path_buf(), place: Place::default() });
-            // A long day's reading: the oldest visits go first.
-            let over = h.len().saturating_sub(HISTORY);
-            h.drain(..over);
-            self.hist_at.set(h.len() - 1);
+            self.record_visit(file.to_path_buf());
         }
         *self.current.borrow_mut() = Some(file.to_path_buf());
         let p = place.clone().unwrap_or_default();
@@ -1375,6 +1369,21 @@ impl Win {
         });
     }
 
+    /// A new stop in back and forward (ADR-0020): `file`, or the gallery
+    /// when it is empty. The place in the one before is kept first; any
+    /// stops ahead are dropped, as in a browser.
+    fn record_visit(&self, file: PathBuf) {
+        self.remember_place();
+        let mut h = self.history.borrow_mut();
+        let keep = if h.is_empty() { 0 } else { self.hist_at.get() + 1 };
+        h.truncate(keep);
+        h.push(Visit { file, place: Place::default() });
+        // A long day's reading: the oldest visits go first.
+        let over = h.len().saturating_sub(HISTORY);
+        h.drain(..over);
+        self.hist_at.set(h.len() - 1);
+    }
+
     /// Back (`dir` -1) or forward (+1) through the files read in this
     /// folder, each at the place it was left (ADR-0020).
     pub fn go_back(&self, dir: i32) {
@@ -1472,7 +1481,7 @@ impl Win {
     /// A new palette: the page background at once, the page itself again.
     pub fn repaint(&self, palette: &crate::theme::Palette) {
         paint_background(&self.web, palette);
-        if self.current.borrow().is_some() {
+        if self.current.borrow().is_some() || self.gallery.borrow().is_some() {
             self.reload_keeping_place();
         }
     }
@@ -1613,10 +1622,7 @@ impl Win {
         }
         let t = std::time::Instant::now();
         let now = std::time::SystemTime::now();
-        let mut dated: Vec<(Option<std::time::SystemTime>, PathBuf)> =
-            files.into_iter().map(|f| (root.join(&f).metadata().and_then(|m| m.modified()).ok(), f)).collect();
-        // Newest first; the tree's order among equals (sort_by is stable).
-        dated.sort_by_key(|d| std::cmp::Reverse(d.0));
+        let dated = folder::by_age(&root, files);
         let items: Vec<Item> = dated
             .iter()
             .map(|(m, f)| {
@@ -1687,14 +1693,7 @@ impl Win {
             return;
         }
         if record {
-            self.remember_place();
-            let mut h = self.history.borrow_mut();
-            let keep = if h.is_empty() { 0 } else { self.hist_at.get() + 1 };
-            h.truncate(keep);
-            h.push(Visit { file: PathBuf::new(), place: Place::default() });
-            let over = h.len().saturating_sub(HISTORY);
-            h.drain(..over);
-            self.hist_at.set(h.len() - 1);
+            self.record_visit(PathBuf::new());
         }
         if self.gallery.borrow().is_none() {
             let tree_was = self.split.shows_sidebar();
@@ -1725,6 +1724,8 @@ impl Win {
         let at = self.gallery_at.get();
         let palette = scheme::palette();
         let width = crate::settings::get().width.px();
+        let build = self.gallery_gen.get() + 1;
+        self.gallery_gen.set(build);
         let (tx, rx) = async_channel::bounded(1);
         let walk_root = root.clone();
         std::thread::spawn(move || {
@@ -1737,7 +1738,9 @@ impl Win {
         glib::spawn_future_local(async move {
             let Ok((cards, html)) = rx.recv().await else { return };
             let Some(w) = weak.upgrade() else { return };
-            if w.root().as_deref() != Some(root.as_path()) {
+            // Another folder, or a newer build on its way (the watcher and a
+            // rescan can both start one): this one is out of date.
+            if w.root().as_deref() != Some(root.as_path()) || w.gallery_gen.get() != build {
                 return;
             }
             // Left the gallery meanwhile: nothing to draw.

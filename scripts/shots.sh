@@ -6,9 +6,10 @@
 #
 #     scripts/shots.sh <folder> <plan> <theme colors.toml> <out dir>
 #
-# Only ever over public folders: the Omarchy repositories kept in
-# ~/.cache/omarepos-shots (see the omarepos-recordings skill). HOME is that
-# fleet's home, so paths in the pictures read ~/Work/<repo>.
+# Only ever over public folders, such as clones of public Omarchy
+# repositories, kept in a home of their own: OMAMV_SHOTS_HOME (by default
+# ~/.cache/omarepos-shots/home). The app runs with that as HOME, so paths in
+# the pictures read ~/Work/<repo> and nothing of the real home shows.
 set -euo pipefail
 
 folder=$(realpath "$1") plan=$(realpath "$2") colors=$(realpath "$3") out=$4

@@ -135,23 +135,23 @@ mod tests {
     #[test]
     fn resolved_like_obsidian() {
         let l = links(
-            "Projects/omamv/ADR/Index.md",
+            "Projects/alpha/ADR/Index.md",
             &[
-                "Projects/omamv/ADR/0004-tree.md",
-                "Projects/omarepos/ADR/0004-tree.md",
-                "Projects/omamv/Project.md",
-                "Projects/Omarush/Project.md",
-                "Projects/Omarush/Research/2026-10-28-01-x.md",
+                "Projects/alpha/ADR/0004-tree.md",
+                "Projects/beta/ADR/0004-tree.md",
+                "Projects/alpha/Project.md",
+                "Projects/Gamma/Project.md",
+                "Projects/Gamma/Research/2026-01-02-01-x.md",
                 "Notes/Inbox.md",
             ],
         );
         // Path from a folder above: the copy closest to this page.
-        assert_eq!(resolve("ADR/0004-tree", &l), Some("Projects/omamv/ADR/0004-tree.md".into()));
+        assert_eq!(resolve("ADR/0004-tree", &l), Some("Projects/alpha/ADR/0004-tree.md".into()));
         // A name alone, anywhere; the nearer one wins.
-        assert_eq!(resolve("Project", &l), Some("Projects/omamv/Project.md".into()));
+        assert_eq!(resolve("Project", &l), Some("Projects/alpha/Project.md".into()));
         assert_eq!(resolve("inbox", &l), Some("Notes/Inbox.md".into()));
-        assert_eq!(resolve("Research/2026-10-28-01-x", &l), Some("Projects/Omarush/Research/2026-10-28-01-x.md".into()));
-        assert_eq!(resolve("0004-tree.md", &l), Some("Projects/omamv/ADR/0004-tree.md".into()));
+        assert_eq!(resolve("Research/2026-01-02-01-x", &l), Some("Projects/Gamma/Research/2026-01-02-01-x.md".into()));
+        assert_eq!(resolve("0004-tree.md", &l), Some("Projects/alpha/ADR/0004-tree.md".into()));
         assert_eq!(resolve("Nowhere", &l), None);
         // From the root, when the folder opened is the project.
         let p = links("ADR/Index.md", &["ADR/0004-tree.md", "Project.md"]);
