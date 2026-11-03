@@ -40,6 +40,8 @@ it). One instance serves every window; a folder already open comes forward.
 
 ![The gallery: the ten newest pages of a folder, drawn small](docs/omamv-gallery.png)
 
+![Ctrl+Shift+F: every line in the Omarchy manual that says "workspace"](docs/omamv-search.png)
+
 ## Careful by design
 
 omamv opens folders it did not write, so what it does to them fits in a

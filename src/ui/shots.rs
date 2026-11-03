@@ -9,7 +9,7 @@
 //! size 1040 560          the window's size, in points
 //! open manual/07.md      a file from the folder's root, and wait until drawn
 //! key o                  a key, as the window takes it: `key p ctrl`, `key S ctrl shift`
-//! type theme             into the dialog's search entry
+//! type theme             into the open picker's or search's entry
 //! hold ctrl              modifiers held, for the status bar: `hold` lets go
 //! js <script>            run in the page
 //! tree 320               the folder tree's width; `tree hide` / `tree show`
@@ -136,6 +136,8 @@ mod imp {
                         // Not the window's: the dialog's entry has it.
                         if let Some(q) = w.quick.borrow().clone() {
                             q.entry.emit_by_name::<()>("activate", &[]);
+                        } else if let Some(s) = w.search.borrow().clone() {
+                            s.entry.emit_by_name::<()>("activate", &[]);
                         }
                     }
                     sleep(400).await;
@@ -144,7 +146,10 @@ mod imp {
                     }
                 }
                 "type" => {
-                    if let Some(q) = w.quick.borrow().clone() {
+                    let search = w.search.borrow().clone().filter(|s| w.window.visible_dialog().is_some_and(|d| d == s.dialog));
+                    if let Some(s) = search {
+                        s.entry.set_text(rest);
+                    } else if let Some(q) = w.quick.borrow().clone() {
                         q.entry.set_text(rest);
                     }
                     sleep(400).await;
