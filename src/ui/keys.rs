@@ -49,6 +49,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+F / /", "find in the page"),
             ("Enter / Shift+Enter", "next / previous match"),
             ("n / N", "next / previous, after Esc"),
+            ("Ctrl+Shift+F", "search all files"),
             ("Esc", "close find, keep the place"),
             ("Ctrl+C", "copy the selection"),
             ("?", "this overview"),
@@ -181,7 +182,14 @@ mod tests {
         assert!(has(&ctrl, "+ − 0"), "{ctrl:?}");
         assert!(ctrl.iter().any(|(k, a)| k == "O" && a == "open a folder") && ctrl.iter().all(|(_, a)| a != "recent folders"), "{ctrl:?}");
         let ctrl_shift = held(&["Ctrl", "Shift"]);
-        assert_eq!(ctrl_shift, [("S".to_owned(), "the whole page as a picture".to_owned()), ("O".to_owned(), "recent folders".to_owned())]);
+        assert_eq!(
+            ctrl_shift,
+            [
+                ("S".to_owned(), "the whole page as a picture".to_owned()),
+                ("O".to_owned(), "recent folders".to_owned()),
+                ("F".to_owned(), "search all files".to_owned())
+            ]
+        );
         let alt = held(&["Alt"]);
         assert_eq!(alt, [("← →".to_owned(), "back / forward".to_owned())]);
     }

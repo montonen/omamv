@@ -158,63 +158,155 @@ window.addEventListener("scroll", () => {
 
 // ---- find ----
 
+// One entry per match: the <mark>s it is drawn in (several when it runs
+// across bold, a link or highlighted code).
 let marks = [];
 let current = -1;
 
+// Text nodes grouped by the block they read in: a match may cross the inline
+// pieces of one paragraph, line of a table or code block, never two blocks.
+const BLOCK = "p, li, td, th, h1, h2, h3, h4, h5, h6, dt, dd, pre, blockquote, figcaption, summary, div, section, article, body";
+
 function clearFind() {
-  for (const m of marks) {
-    const parent = m.parentNode;
-    if (!parent) continue;
-    parent.replaceChild(document.createTextNode(m.textContent), m);
-    parent.normalize();
+  const parents = new Set();
+  for (const group of marks) {
+    for (const m of group) {
+      const parent = m.parentNode;
+      if (!parent) continue;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parents.add(parent);
+    }
   }
+  for (const p of parents) p.normalize();
   marks = [];
   current = -1;
 }
 
-function find(query) {
-  clearFind();
-  const q = query.toLowerCase();
-  if (!q) return JSON.stringify({ count: 0, at: 0 });
+// Lowercased one character for one, white space runs as one space; `map`
+// says where each kept character was. The search in all files folds the same.
+function fold(text) {
+  let out = "";
+  const map = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (/\s/.test(c)) {
+      if (out.length && out[out.length - 1] !== " ") {
+        out += " ";
+        map.push(i);
+      }
+      continue;
+    }
+    const l = c.toLowerCase();
+    out += l.length === 1 ? l : c;
+    map.push(i);
+  }
+  return { text: out, map };
+}
+
+// Every block's text and its matches: [{block, text, hits: [start in text]}].
+function search(query) {
+  const q = fold(query.trim()).text.trim();
+  if (!q) return { q, blocks: [] };
   const root = document.querySelector(".page") || document.body;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (n) => (n.parentElement && n.parentElement.closest("svg, script, style, pre.mermaid") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
-  const nodes = [];
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
-  for (const node of nodes) {
-    const text = node.nodeValue;
-    const lower = text.toLowerCase();
-    let at = lower.indexOf(q);
-    if (at < 0) continue;
-    const frag = document.createDocumentFragment();
-    let last = 0;
-    while (at >= 0 && marks.length < 5000) {
-      frag.appendChild(document.createTextNode(text.slice(last, at)));
-      const m = document.createElement("mark");
-      m.className = "om-find";
-      m.textContent = text.slice(at, at + q.length);
-      frag.appendChild(m);
-      marks.push(m);
-      last = at + q.length;
-      at = lower.indexOf(q, last);
+  const blocks = [];
+  let last = null;
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const block = n.parentElement.closest(BLOCK) || root;
+    if (!last || last.block !== block) {
+      last = { block, nodes: [], raw: "" };
+      blocks.push(last);
     }
-    frag.appendChild(document.createTextNode(text.slice(last)));
-    node.parentNode.replaceChild(frag, node);
+    last.nodes.push({ node: n, from: last.raw.length });
+    last.raw += n.nodeValue;
+  }
+  const out = [];
+  for (const b of blocks) {
+    const f = fold(b.raw);
+    const hits = [];
+    let at = f.text.indexOf(q);
+    while (at >= 0) {
+      hits.push(at);
+      at = f.text.indexOf(q, at + q.length);
+    }
+    out.push({ ...b, folded: f, hits });
+  }
+  return { q, blocks: out };
+}
+
+function find(query) {
+  clearFind();
+  const { q, blocks } = search(query);
+  for (const b of blocks) {
+    if (!b.hits.length) continue;
+    // Raw ranges of the matches, cut at the node they fall in, last first so
+    // earlier offsets stay true.
+    const ranges = b.hits.slice(0, Math.max(0, 5000 - marks.length)).map((s) => [b.folded.map[s], b.folded.map[s + q.length - 1] + 1]);
+    const groups = ranges.map(() => []);
+    for (let k = b.nodes.length - 1; k >= 0; k--) {
+      const { node, from } = b.nodes[k];
+      const to = from + node.nodeValue.length;
+      const pieces = [];
+      ranges.forEach(([s, e], i) => {
+        if (s < to && e > from) pieces.push([Math.max(s, from) - from, Math.min(e, to) - from, i]);
+      });
+      if (!pieces.length) continue;
+      const text = node.nodeValue;
+      const frag = document.createDocumentFragment();
+      let lastAt = 0;
+      for (const [s, e, i] of pieces) {
+        frag.appendChild(document.createTextNode(text.slice(lastAt, s)));
+        const m = document.createElement("mark");
+        m.className = "om-find";
+        m.textContent = text.slice(s, e);
+        frag.appendChild(m);
+        groups[i].unshift(m);
+        lastAt = e;
+      }
+      frag.appendChild(document.createTextNode(text.slice(lastAt)));
+      node.parentNode.replaceChild(frag, node);
+    }
+    for (const g of groups) if (g.length) marks.push(g);
   }
   if (marks.length) {
     // Start at the first match on screen or below it.
-    const top = 0;
-    current = marks.findIndex((m) => m.getBoundingClientRect().top >= top);
+    current = marks.findIndex((g) => g[0].getBoundingClientRect().top >= 0);
     if (current < 0) current = 0;
     show();
   }
   return JSON.stringify({ count: marks.length, at: marks.length ? current + 1 : 0 });
 }
 
+// Find, then go to one match from the search in all files (ADR-0025): the
+// `nth` in the block that holds `line`, or else the `nthInFile` of the page.
+function findAt(query, line, nth, nthInFile) {
+  clearFind();
+  const want = fold(line).text;
+  const { q, blocks } = search(query);
+  let target = -1;
+  let seen = 0;
+  for (const b of blocks) {
+    const at = want ? b.folded.text.indexOf(want) : -1;
+    if (target < 0 && at >= 0) {
+      const inLine = b.hits.filter((s) => s >= at && s < at + want.length);
+      if (nth < inLine.length) target = seen + b.hits.indexOf(inLine[nth]);
+    }
+    seen += b.hits.length;
+  }
+  if (!q) return JSON.stringify({ count: 0, at: 0 });
+  const r = JSON.parse(find(query));
+  if (!r.count) return JSON.stringify(r);
+  if (target < 0) target = Math.min(nthInFile, marks.length - 1);
+  current = Math.min(target, marks.length - 1);
+  show();
+  return JSON.stringify({ count: marks.length, at: current + 1 });
+}
+
 function show() {
-  marks.forEach((m, i) => m.classList.toggle("cur", i === current));
-  marks[current].scrollIntoView({ block: "center", behavior: "instant" });
+  marks.forEach((g, i) => g.forEach((m) => m.classList.toggle("cur", i === current)));
+  marks[current][0].scrollIntoView({ block: "center", behavior: "instant" });
 }
 
 function step(dir) {
@@ -253,7 +345,7 @@ if (document.querySelector(".om-gallery")) {
   window.addEventListener("resize", fitGallery);
 }
 
-window.omamv = { place, scroll: scrollCmd, find, step, endFind, gone, select };
+window.omamv = { place, scroll: scrollCmd, find, findAt, step, endFind, gone, select };
 window.__omamvLoaded = true;
 
 (async () => {

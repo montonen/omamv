@@ -19,6 +19,7 @@ mod places;
 mod recent;
 mod render;
 mod scheme;
+mod search;
 mod settings;
 mod theme;
 mod ui;

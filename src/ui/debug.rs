@@ -924,6 +924,111 @@ mod imp {
         press(&w, gdk::Key::Escape);
         sleep(100).await;
 
+        // ---- search all files (ADR-0025)
+        w.open_file(Path::new("README.md"), None, None, true);
+        ready(&w).await;
+        // The page's find now runs across bold, italic and code in one block.
+        let crossing = js(&w, "omamv.find('with bold, italic, inline code')").await;
+        r.check("find matches across bold, italic and code", crossing.contains("\"count\":1"), &crossing);
+        js(&w, "omamv.endFind()").await;
+        let shift_ctrl = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
+        key(&w, gdk::Key::F, shift_ctrl);
+        sleep(300).await;
+        let sa = w.search.borrow().clone();
+        r.check("Ctrl+Shift+F opens the search", sa.is_some() && w.keyboard_mode() == Mode::SearchAll, format!("{:?}", w.keyboard_mode()));
+        r.check("status bar: search keys", w.status.mode() == Some(Mode::SearchAll), format!("{:?}", w.status.mode()));
+        if let Some(sa) = sa {
+            let answer = |sa: &Rc<super::super::searchall::SearchAll>| sa.answers.get();
+            wait_until(4_000, || answer(&sa) > 0).await;
+            // Setting the text empties the entry first, which is answered at
+            // once: wait for the answer to this query.
+            let ask = async |q: &str| {
+                let before = answer(&sa);
+                sa.entry.set_text(q);
+                wait_until(4_000, || answer(&sa) > before && *sa.answered.borrow() == q).await;
+                sleep(50).await;
+                sa.shown()
+            };
+            let lower = ask("paragraph").await;
+            let upper = ask("Paragraph").await;
+            r.check("lower case ignores case", lower.iter().any(|h| h == "README.md:3"), format!("{} hits", lower.len()));
+            r.check("  a capital matches case", !upper.is_empty() && !upper.iter().any(|h| h == "README.md:3") && upper.len() < lower.len(), format!("{} of {}", upper.len(), lower.len()));
+            r.check("  and the summary counts them", sa.summary.label().contains("line"), sa.summary.label());
+            let target = ask("other.md#second").await;
+            r.check("a link target is not text", target.is_empty() && sa.summary.label() == "Nothing found", format!("{target:?}"));
+            let diagram = ask("walk the folder").await;
+            r.check("diagram source is not text", diagram.is_empty(), format!("{diagram:?}"));
+            let words = ask("being read changes").await;
+            r.check("a phrase is found in its file", words == ["docs/architecture.md:7"], format!("{words:?}"));
+
+            // A file written while the search is open is searched too.
+            let new = root.join("notes/zebra.md");
+            let before = answer(&sa);
+            ask("zebracorn").await;
+            let _ = std::fs::write(&new, "# Zebra\n\nA zebracorn walks by.\n");
+            let seen = wait_until(5_000, || answer(&sa) > before + 1 && sa.shown().iter().any(|h| h == "notes/zebra.md:3")).await;
+            r.check("a file written while open is searched", seen, format!("{:?}", sa.shown()));
+            // Gone again; the folder is read again and the page redrawn first.
+            let scans = w.scans.get();
+            let _ = std::fs::remove_file(&new);
+            wait_until(5_000, || w.scans.get() > scans).await;
+            sleep(400).await;
+            ready(&w).await;
+
+            // Open a hit: its file, at that match, which becomes the find.
+            // "Paragraph 2" is in paragraphs 2 and 20–29; the second hit is
+            // paragraph 20, the page's second match.
+            let hits = ask("Paragraph 2").await;
+            r.check("hits come in file order", hits.first().is_some_and(|h| h == "README.md:84") && hits.get(1).is_some_and(|h| h == "README.md:156"), format!("{hits:?}"));
+            // README.md is open already: no new page, the find runs on this one.
+            sa.open_at(1);
+            let cur_block = "(document.querySelector('mark.om-find.cur')?.closest('p')?.textContent || '').slice(0, 13)";
+            let mut cur = String::new();
+            let t = Instant::now();
+            while t.elapsed() < Duration::from_millis(4_000) {
+                cur = js(&w, cur_block).await;
+                if !cur.is_empty() {
+                    break;
+                }
+                sleep(50).await;
+            }
+            r.check("Enter opens the hit, at its match", current(&w) == "README.md" && cur == "Paragraph 20 ", format!("{} {cur:?} in {} ms", current(&w), t.elapsed().as_millis()));
+            r.check("  the dialog closed", w.window.visible_dialog().is_none(), "");
+            r.check("  the count is the page's", w.find_count.label().starts_with("2 of "), w.find_count.label());
+            let in_view = js(&w, "(() => { const r = document.querySelector('mark.om-find.cur').getBoundingClientRect(); return String(r.top >= 0 && r.bottom <= innerHeight) })()").await;
+            r.check("  in view", in_view == "true", &in_view);
+            w.web.grab_focus();
+            press(&w, gdk::Key::n);
+            sleep(300).await;
+            let next = js(&w, cur_block).await;
+            r.check("  n goes on to the next match", next == "Paragraph 21 ", &next);
+        }
+
+        // Ctrl+Shift+F again: the last query, the same hit.
+        key(&w, gdk::Key::F, shift_ctrl);
+        sleep(300).await;
+        let again = w.search.borrow().clone();
+        if let Some(sa) = again {
+            wait_until(4_000, || *sa.answered.borrow() == "Paragraph 2" && sa.selected() == 1).await;
+            r.check("Ctrl+Shift+F again keeps the query and the hit", sa.query() == "Paragraph 2" && sa.selected() == 1, format!("{:?} {}", sa.query(), sa.selected()));
+            // A hit in another file than the one shown.
+            sa.entry.set_text("the page is drawn again");
+            wait_until(4_000, || *sa.answered.borrow() == "the page is drawn again").await;
+            let loaded = nav(&w, || sa.open_at(0)).await;
+            sleep(300).await;
+            let cur = js(&w, "document.querySelector('mark.om-find.cur')?.textContent || ''").await;
+            r.check("a hit in another file opens there", loaded && current(&w) == "docs/architecture.md" && cur.contains("drawn"), format!("{} {cur:?}", current(&w)));
+        } else {
+            r.check("Ctrl+Shift+F again keeps the query and the hit", false, "no search");
+        }
+        key(&w, gdk::Key::F, shift_ctrl);
+        sleep(300).await;
+        if let Some(sa) = w.search.borrow().clone() {
+            sa.entry.emit_by_name::<()>("stop-search", &[]);
+        }
+        sleep(200).await;
+        r.check("Esc closes the search", w.window.visible_dialog().is_none(), "");
+
         r.note("failed", r.failed);
         r.note("took ms", t0.elapsed().as_millis());
         if let Err(e) = std::fs::write(&report, r.lines.join("\n") + "\n") {

@@ -20,6 +20,8 @@ pub enum Mode {
     Reading,
     /// The gallery of the newest files (ADR-0024).
     Gallery,
+    /// Search all files (ADR-0025).
+    SearchAll,
 }
 
 impl Mode {
@@ -51,6 +53,7 @@ impl Mode {
             Mode::Start => &[("1 9", "open a recent folder"), ("j k", "move"), ("Enter", "open"), ("Ctrl+O", "choose a folder"), ("?", "all keys")],
             Mode::Empty => &[("Ctrl+O", "choose a folder"), ("Ctrl+Shift+O", "recent folders"), ("?", "all keys")],
             Mode::Reading => &[],
+            Mode::SearchAll => &[("↑ ↓", "move"), ("Enter", "open at the match"), ("Esc", "close")],
             Mode::Gallery => &[("1–0", "open a card"), ("← → ↑ ↓", "move"), ("Enter", "open"), ("Esc", "back"), ("?", "all keys")],
         }
     }
@@ -311,7 +314,7 @@ mod tests {
         for mode in [Mode::Page, Mode::Tree, Mode::Start, Mode::Empty] {
             assert!(mode.hints().iter().any(|(k, _)| *k == "?"), "{mode:?} points to ?");
         }
-        for mode in [Mode::Tree, Mode::Find, Mode::QuickOpen, Mode::Dialog] {
+        for mode in [Mode::Tree, Mode::Find, Mode::QuickOpen, Mode::SearchAll, Mode::Dialog] {
             assert!(mode.hints().iter().any(|(k, _)| *k == "Esc"), "{mode:?} says how to get out");
         }
     }

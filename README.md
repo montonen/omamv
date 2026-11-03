@@ -31,6 +31,8 @@ it). One instance serves every window; a folder already open comes forward.
   new one is named in the status bar.
 - **The newest first**: `Ctrl+P` lists every file with its age; `Ctrl+G` shows
   the ten newest as rendered cards, `1`–`0` to open one.
+- **Search every file**: `Ctrl+Shift+F` finds a word in all of them, newest
+  first, and opens the file at that line.
 - **Remembers**: a folder opens on the file you read last there, at the same
   heading; back and forward step through what you read.
 - **Its place in git**: the header says if the file is modified, staged or
@@ -67,6 +69,7 @@ where you are, and holding `Ctrl` shows what it does.
 | `H` `L` · `Alt+←` `Alt+→` · mouse thumb buttons | back / forward, each at its place |
 | `o` | outline: go to a heading |
 | `/` or `Ctrl+F` · `n` `N` | find |
+| `Ctrl+Shift+F` | search all files |
 | `Ctrl+B` · `<` `>` | folder tree: focus or hide · narrower / wider |
 | `e` · `y` | open in your editor · copy the file's path |
 | `Ctrl+Shift+S` | the whole page as one tall picture, saved and copied |

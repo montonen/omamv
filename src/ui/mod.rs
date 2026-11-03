@@ -4,6 +4,7 @@ pub mod debug;
 pub mod shots;
 mod keys;
 pub mod quickopen;
+pub mod searchall;
 mod settings;
 mod start;
 pub mod status;

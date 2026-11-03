@@ -17,6 +17,7 @@ use webkit6::prelude::*;
 use webkit6::{NavigationPolicyDecision, PolicyDecisionType, WebView};
 
 use super::quickopen::{Item, QuickOpen};
+use super::searchall::SearchAll;
 use super::start::Start;
 use super::status::{Mode, Status};
 use super::tree::Tree;
@@ -50,6 +51,7 @@ enum Timer {
     Rescan,
     Git,
     Gallery,
+    Search,
 }
 
 /// The gallery while it shows (ADR-0024).
@@ -127,6 +129,7 @@ pub struct Win {
     /// The card highlighted, kept for a return to the gallery.
     gallery_at: Cell<usize>,
     gallery_timer: RefCell<Option<glib::SourceId>>,
+    search_timer: RefCell<Option<glib::SourceId>>,
     /// Gallery builds started: only the newest one is drawn.
     gallery_gen: Cell<u64>,
     pub banner: adw::Banner,
@@ -172,6 +175,12 @@ pub struct Win {
     /// What the page said last (debug and the self-check read it).
     pub last_message: RefCell<String>,
     pub quick: RefCell<Option<Rc<QuickOpen>>>,
+    /// Search all files while it is open (ADR-0025).
+    pub search: RefCell<Option<Rc<SearchAll>>>,
+    /// The last search and the hit picked: Ctrl+Shift+F comes back to them.
+    search_last: RefCell<(String, usize)>,
+    /// Run once the next page is drawn: going to a hit from the search.
+    after_ready: RefCell<Option<String>>,
     /// Command lines waiting for this window to close (`omamv -w`).
     held: RefCell<Vec<gio::ApplicationCommandLine>>,
     me: RefCell<std::rc::Weak<Win>>,
@@ -366,6 +375,7 @@ impl Win {
             gallery: RefCell::new(None),
             gallery_at: Cell::new(0),
             gallery_timer: RefCell::new(None),
+            search_timer: RefCell::new(None),
             gallery_gen: Cell::new(0),
             banner,
             status,
@@ -401,6 +411,9 @@ impl Win {
             loads: Cell::new(0),
             last_message: RefCell::new(String::new()),
             quick: RefCell::new(None),
+            search: RefCell::new(None),
+            search_last: RefCell::new((String::new(), 0)),
+            after_ready: RefCell::new(None),
             held: RefCell::new(Vec::new()),
             me: RefCell::new(std::rc::Weak::new()),
         });
@@ -450,6 +463,9 @@ impl Win {
                 w.ready.set(true);
                 if w.gone.get() {
                     w.js("omamv.gone(true)");
+                }
+                if let Some(script) = w.after_ready.borrow_mut().take() {
+                    w.find_js(&script);
                 }
                 // How fast: the folder's scan, and the first page drawn.
                 if let Some(t) = w.opened_at.take() {
@@ -849,6 +865,10 @@ impl Win {
                 self.save_picture();
                 return true;
             }
+            (true, _, "F") => {
+                self.search_all();
+                return true;
+            }
             (true, _, "g") => {
                 if self.gallery.borrow().is_some() {
                     self.go_back(-1);
@@ -1174,7 +1194,13 @@ impl Win {
                 w.name_new_files(&scan);
             }
             scheme::set_files(&w.host, scan.order.clone());
+            let files_changed = w.scan.borrow().order != scan.order;
             *w.scan.borrow_mut() = scan;
+            // A file added or removed while the search is open (ADR-0025).
+            let searching = w.search.borrow().clone();
+            if let Some(sa) = searching.filter(|_| files_changed && !first) {
+                w.read_for_search(&sa);
+            }
             if ask_now {
                 w.pick_a_file();
             } else if let Some(f) = pick {
@@ -1506,6 +1532,10 @@ impl Win {
         if self.gallery.borrow().is_some() && folder::is_shown(&change.path) {
             self.debounce(Timer::Gallery);
         }
+        // A file written while the search is open: searched again.
+        if self.search.borrow().is_some() && folder::is_shown(&change.path) {
+            self.debounce(Timer::Search);
+        }
     }
 
     fn debounce(&self, which: Timer) {
@@ -1514,6 +1544,7 @@ impl Win {
             Timer::Rescan => (&self.rescan_timer, 300),
             Timer::Git => (&self.git_timer, 250),
             Timer::Gallery => (&self.gallery_timer, 300),
+            Timer::Search => (&self.search_timer, 300),
         };
         if let Some(id) = slot.borrow_mut().take() {
             id.remove();
@@ -1534,6 +1565,13 @@ impl Win {
                     w.gallery_timer.borrow_mut().take();
                     if w.gallery.borrow().is_some() {
                         w.build_gallery();
+                    }
+                }
+                Timer::Search => {
+                    w.search_timer.borrow_mut().take();
+                    let open = w.search.borrow().clone();
+                    if let Some(s) = open {
+                        w.read_for_search(&s);
                     }
                 }
                 Timer::Rescan => {
@@ -1668,6 +1706,83 @@ impl Win {
             }
         });
         self.present_picker(qo);
+    }
+
+    /// Ctrl+Shift+F: search the text of every file the tree shows
+    /// (ADR-0025), with the last query and hit picked again.
+    pub fn search_all(&self) {
+        if self.root().is_none() || self.scan.borrow().order.is_empty() {
+            return;
+        }
+        let weak = self.weak();
+        let sa = SearchAll::new(&scheme::palette().accent, move |path, hit, query| {
+            if let Some(w) = weak.upgrade() {
+                w.open_hit(path, hit, query);
+            }
+        });
+        *self.search.borrow_mut() = Some(sa.clone());
+        let weak = self.weak();
+        let me = Rc::downgrade(&sa);
+        sa.dialog.connect_closed(move |_| {
+            let (Some(w), Some(sa)) = (weak.upgrade(), me.upgrade()) else { return };
+            *w.search_last.borrow_mut() = (sa.query(), sa.selected());
+            // Not while the self-check still reads it; the next one replaces it anyway.
+            if !super::debug::driven() {
+                w.search.borrow_mut().take();
+            }
+            w.update_status();
+        });
+        let (query, selected) = self.search_last.borrow().clone();
+        sa.present(&self.window, &query, selected);
+        self.read_for_search(&sa);
+        self.update_status();
+    }
+
+    /// The folder's text for the search, read off the main thread, newest
+    /// file first as in Ctrl+P (ADR-0017).
+    fn read_for_search(&self, sa: &Rc<SearchAll>) {
+        let Some(root) = self.root() else { return };
+        let files = self.scan.borrow().order.clone();
+        let (tx, rx) = async_channel::bounded(1);
+        std::thread::spawn(move || {
+            let t = std::time::Instant::now();
+            let files: Vec<PathBuf> = folder::by_age(&root, files).into_iter().map(|(_, f)| f).collect();
+            let corpus = crate::search::corpus(&root, &files);
+            let _ = tx.send_blocking((corpus, t.elapsed().as_millis()));
+        });
+        let weak = Rc::downgrade(sa);
+        glib::spawn_future_local(async move {
+            let Ok((corpus, ms)) = rx.recv().await else { return };
+            trace!("search: {} files read in {ms} ms", corpus.len());
+            if let Some(sa) = weak.upgrade() {
+                sa.set_corpus(std::sync::Arc::new(corpus));
+            }
+        });
+    }
+
+    /// A hit picked: its file, at the match, which becomes the page's find
+    /// so `n` / `N` go on from it.
+    fn open_hit(&self, path: &Path, hit: &crate::search::Hit, query: &str) {
+        let script = format!("omamv.findAt({}, {}, {}, {})", js_string(query), js_string(&hit.text), hit.nth_in_line, hit.nth_in_file);
+        *self.last_find.borrow_mut() = crate::search::squash(query);
+        let same = self.current.borrow().as_deref() == Some(path);
+        if same && self.ready.get() {
+            self.find_js(&script);
+        } else {
+            *self.after_ready.borrow_mut() = Some(script);
+            self.open_file(path, None, None, true);
+        }
+        self.web.grab_focus();
+        // The marks stay a while, as after a find closed with Esc.
+        let weak = self.weak();
+        glib::timeout_add_local_once(Duration::from_millis(4000), move || {
+            if let Some(w) = weak.upgrade()
+                && !w.findbar.is_search_mode()
+                && w.after_ready.borrow().is_none()
+            {
+                w.js("omamv.endFind()");
+            }
+        });
     }
 
     fn present_picker(&self, qo: Rc<QuickOpen>) {
@@ -2028,7 +2143,14 @@ impl Win {
     pub fn keyboard_mode(&self) -> Mode {
         if let Some(d) = self.window.visible_dialog() {
             let quick = self.quick.borrow().as_ref().is_some_and(|q| q.dialog == d);
-            return if quick { Mode::QuickOpen } else { Mode::Dialog };
+            let search = self.search.borrow().as_ref().is_some_and(|s| s.dialog == d);
+            return if quick {
+                Mode::QuickOpen
+            } else if search {
+                Mode::SearchAll
+            } else {
+                Mode::Dialog
+            };
         }
         match self.showing().as_str() {
             "start" => return Mode::Start,
