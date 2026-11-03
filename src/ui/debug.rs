@@ -954,6 +954,9 @@ mod imp {
             r.check("lower case ignores case", lower.iter().any(|h| h == "README.md:3"), format!("{} hits", lower.len()));
             r.check("  a capital matches case", !upper.is_empty() && !upper.iter().any(|h| h == "README.md:3") && upper.len() < lower.len(), format!("{} of {}", upper.len(), lower.len()));
             r.check("  and the summary counts them", sa.summary.label().contains("line"), sa.summary.label());
+            // The answer comes after the panel is drawn: the list must still get its room.
+            let (min, _, _, _) = sa.scroller.measure(gtk::Orientation::Vertical, -1);
+            r.check("  the list has room for the hits", min >= 400, format!("{min} px"));
             let target = ask("other.md#second").await;
             r.check("a link target is not text", target.is_empty() && sa.summary.label() == "Nothing found", format!("{target:?}"));
             let diagram = ask("walk the folder").await;

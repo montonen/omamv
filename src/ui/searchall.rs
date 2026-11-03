@@ -23,7 +23,7 @@ pub struct SearchAll {
     pub entry: gtk::SearchEntry,
     pub list: gtk::ListBox,
     pub summary: gtk::Label,
-    scroller: gtk::ScrolledWindow,
+    pub scroller: gtk::ScrolledWindow,
     corpus: RefCell<Option<Arc<Vec<Doc>>>>,
     found: RefCell<Found>,
     /// Bumped by each search: an answer to an older one is dropped.
@@ -49,6 +49,7 @@ impl SearchAll {
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .propagate_natural_height(true)
+            .min_content_height(420)
             .max_content_height(420)
             .child(&list)
             .build();
