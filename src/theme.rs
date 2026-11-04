@@ -321,6 +321,8 @@ headerbar.om-header button:checked { background: none; color: alpha(@om_fg, 0.7)
 headerbar.om-header button:hover { background: alpha(@om_fg, 0.08); }
 .om-title { font-weight: 700; color: @om_bright; }
 .om-subtitle { font-size: 0.86em; color: alpha(@om_fg, 0.7); }
+headerbar.om-header button.om-copy { min-height: 20px; min-width: 20px; padding: 0 2px; margin: -4px 0; opacity: 0; transition: opacity 150ms; }
+headerbar.om-header button.om-copy.om-near { opacity: 1; }
 .om-changed { font-size: 0.86em; color: alpha(@om_fg, 0.7); }
 .om-git { font-size: 0.86em; color: alpha(@om_fg, 0.7); font-feature-settings: "tnum"; }
 .om-dot { color: @om_accent; }

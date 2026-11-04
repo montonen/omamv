@@ -491,6 +491,13 @@ mod imp {
         press(&w, gdk::Key::e);
         r.check("  an editor that is not there says so", w.status.shown_note().is_some_and(|n| n.contains("no-such-editor-omamv not found")), format!("{:?}", w.status.shown_note()));
 
+        // The copy button by the folder in the header: the full path, ~ spelt out.
+        w.window.clipboard().set_text("");
+        w.copy_dir.emit_clicked();
+        let copied = w.window.clipboard().read_text_future().await.ok().flatten().map(|t| t.to_string()).unwrap_or_default();
+        r.check("the header's copy button copies the folder's full path", w.copy_dir.is_visible() && copied == root.join("docs").to_string_lossy() && w.copy_dir.icon_name().as_deref() == Some("object-select-symbolic"), format!("{copied:?} {:?}", w.copy_dir.icon_name()));
+        r.check("  and is not seen until the mouse is near", !w.copy_dir.has_css_class("om-near"), "");
+
         // f: a stand-in file manager the same way; Omarchy's default (GIO) is never started here (ADR-0026).
         let given_dir = report.with_extension("folder");
         let mut s = crate::settings::get();

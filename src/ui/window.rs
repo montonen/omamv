@@ -118,6 +118,9 @@ pub struct Win {
     expect: RefCell<String>,
     title: gtk::Label,
     subtitle: gtk::Label,
+    /// Copies `subtitle_dir`, the folder the subtitle names, when it names one.
+    pub copy_dir: gtk::Button,
+    subtitle_dir: RefCell<Option<PathBuf>>,
     pub changed: gtk::Label,
     gone_label: gtk::Label,
     /// The open file in git (ADR-0022).
@@ -226,11 +229,27 @@ impl Win {
         let sub_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         sub_row.set_halign(gtk::Align::Center);
         sub_row.append(&subtitle);
+        // The folder's full path to the clipboard; seen only with the mouse near.
+        let copy_dir = gtk::Button::builder().icon_name("edit-copy-symbolic").tooltip_text("Copy the folder's path").focusable(false).valign(gtk::Align::Center).visible(false).build();
+        copy_dir.add_css_class("flat");
+        copy_dir.add_css_class("om-copy");
+        sub_row.append(&copy_dir);
         sub_row.append(&git_label);
         sub_row.append(&changed);
         sub_row.append(&gone_label);
         let title_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
         title_box.set_valign(gtk::Align::Center);
+        title_box.add_css_class("om-title-box");
+        let near = gtk::EventControllerMotion::new();
+        near.connect_enter({
+            let copy_dir = copy_dir.clone();
+            move |_, _, _| copy_dir.add_css_class("om-near")
+        });
+        near.connect_leave({
+            let copy_dir = copy_dir.clone();
+            move |_| copy_dir.remove_css_class("om-near")
+        });
+        title_box.add_controller(near);
         title_box.append(&title);
         title_box.append(&sub_row);
 
@@ -367,6 +386,8 @@ impl Win {
             expect: RefCell::new(String::new()),
             title,
             subtitle,
+            copy_dir,
+            subtitle_dir: RefCell::new(None),
             changed,
             gone_label,
             git_label,
@@ -565,6 +586,12 @@ impl Win {
         });
 
         // Header buttons.
+        let weak = self.weak();
+        self.copy_dir.connect_clicked(move |_| {
+            if let Some(w) = weak.upgrade() {
+                w.copy_folder_path();
+            }
+        });
         let weak = self.weak();
         self.find_button.connect_clicked(move |_| {
             if let Some(w) = weak.upgrade() {
@@ -1025,6 +1052,8 @@ impl Win {
         self.set_chrome(false);
         self.title.set_label("omamv");
         self.subtitle.set_label(if self.root.borrow().is_some() { "recent folders" } else { "no folder open" });
+        self.subtitle_dir.replace(None);
+        self.copy_dir.set_visible(false);
         self.changed.set_visible(false);
         self.gone_label.set_visible(false);
         self.window.set_title(Some("omamv"));
@@ -1114,7 +1143,7 @@ impl Win {
         self.stack.set_visible_child_name("reading");
         self.set_chrome(false);
         self.title.set_label(&folder::file_name(&root));
-        self.subtitle.set_label(&folder::tilde(&root));
+        self.show_folder(&root);
         self.web.load_html(&crate::render::wrap("", "", &scheme::palette()), None);
 
         // Follow the disk: the folders to watch come with the scan.
@@ -1308,7 +1337,7 @@ impl Win {
         let name = folder::file_name(file);
         self.title.set_label(&name);
         let dir = file.parent().map(|p| root.join(p)).unwrap_or(root);
-        self.subtitle.set_label(&folder::tilde(&dir));
+        self.show_folder(&dir);
         self.window.set_title(Some(&format!("{name} — omamv")));
         self.changed.set_visible(false);
         self.tree.mark(Some(file));
@@ -1825,7 +1854,7 @@ impl Win {
         self.changed.set_visible(false);
         self.git_label.set_visible(false);
         self.title.set_label("Gallery");
-        self.subtitle.set_label(&folder::tilde(&root));
+        self.show_folder(&root);
         self.window.set_title(Some(&format!("Gallery · {} — omamv", folder::file_name(&root))));
         self.build_gallery();
         self.web.grab_focus();
@@ -1980,6 +2009,27 @@ impl Win {
         let ctx = gtk::prelude::WidgetExt::display(&self.window).app_launch_context();
         app.launch(&[gio::File::for_path(dir)], Some(&ctx)).map_err(|e| format!("{name} did not start: {e}"))?;
         Ok(name)
+    }
+
+    /// The subtitle names `dir`, and its copy button copies it.
+    fn show_folder(&self, dir: &Path) {
+        self.subtitle.set_label(&folder::tilde(dir));
+        self.subtitle_dir.replace(Some(dir.to_path_buf()));
+        self.copy_dir.set_visible(true);
+    }
+
+    /// The copy button: the folder's full path, `~` spelt out.
+    pub fn copy_folder_path(&self) {
+        let Some(dir) = self.subtitle_dir.borrow().clone() else { return };
+        self.window.clipboard().set_text(&dir.to_string_lossy());
+        self.status.note(&format!("copied {}", dir.display()));
+        self.copy_dir.set_icon_name("object-select-symbolic");
+        let weak = self.weak();
+        glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+            if let Some(w) = weak.upgrade() {
+                w.copy_dir.set_icon_name("edit-copy-symbolic");
+            }
+        });
     }
 
     /// `y`: the open file's full path to the clipboard.
