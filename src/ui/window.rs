@@ -965,6 +965,7 @@ impl Win {
             "greater" => self.step_tree_width(32.0),
             "y" => self.copy_path(),
             "e" => self.edit(),
+            "f" => self.show_in_file_manager(),
             "n" => self.find_again(1),
             "N" => self.find_again(-1),
             "question" => self.show_keys(),
@@ -1943,6 +1944,42 @@ impl Win {
             Ok(name) => self.status.note(&format!("opened in {name}")),
             Err(why) => self.status.note(&why),
         }
+    }
+
+    /// `f`: a folder in the file manager (ADR-0026). In the tree, the one
+    /// under the cursor; on the page, the open file's; else the root.
+    fn show_in_file_manager(&self) {
+        let Some(root) = self.root() else { return };
+        let rel = if self.tree.has_focus() {
+            self.tree.cursor_folder()
+        } else {
+            self.current.borrow().as_ref().map(|f| f.parent().map(Path::to_path_buf).unwrap_or_default())
+        };
+        let dir = root.join(rel.unwrap_or_default());
+        if !dir.is_dir() {
+            self.status.note(&format!("{} is gone: nothing to open", folder::tilde(&dir)));
+            return;
+        }
+        let s = crate::settings::get();
+        let opened = if s.file_manager_custom { crate::editor::open_folder(&s.file_manager, &dir) } else { self.default_file_manager(&dir) };
+        match opened {
+            Ok(name) => self.status.note(&format!("opened {} in {name}", folder::tilde(&dir))),
+            Err(why) => self.status.note(&why),
+        }
+    }
+
+    /// The desktop's default app for folders, through GIO: Nautilus on
+    /// stock Omarchy, or what replaced it (flea sets itself).
+    fn default_file_manager(&self, dir: &Path) -> Result<String, String> {
+        let app = gio::AppInfo::default_for_type("inode/directory", false)
+            .ok_or_else(|| "the desktop has no app for folders (Ctrl+, sets a command)".to_owned())?;
+        if app.id().is_some_and(|id| id.trim_end_matches(".desktop") == crate::APP_ID) {
+            return Err("the desktop opens folders in omamv itself (Ctrl+, sets a file manager)".into());
+        }
+        let name = app.display_name().to_string();
+        let ctx = gtk::prelude::WidgetExt::display(&self.window).app_launch_context();
+        app.launch(&[gio::File::for_path(dir)], Some(&ctx)).map_err(|e| format!("{name} did not start: {e}"))?;
+        Ok(name)
     }
 
     /// `y`: the open file's full path to the clipboard.

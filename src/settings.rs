@@ -61,6 +61,11 @@ pub struct Settings {
     /// The editor `e` opens a file in (ADR-0021): a command, the file's path
     /// added at the end. Empty: Omarchy's default editor.
     pub editor: String,
+    /// The file manager `f` opens a folder in (ADR-0026): true for the
+    /// command below, false for the desktop's default for folders.
+    pub file_manager_custom: bool,
+    /// A command, the folder's path added at the end. Kept while unused.
+    pub file_manager: String,
 }
 
 /// The folder tree's width: narrowest, widest, and to start with.
@@ -85,6 +90,8 @@ impl Default for Settings {
             ask_on_open: false,
             html: false,
             editor: String::new(),
+            file_manager_custom: false,
+            file_manager: String::new(),
         }
     }
 }
@@ -123,6 +130,8 @@ impl Settings {
             ask_on_open: table.get("on_open").and_then(toml::Value::as_str).map_or(d.ask_on_open, |s| s == "open-by-name"),
             html: flag("show_html", d.html),
             editor: table.get("editor").and_then(toml::Value::as_str).map(str::trim).unwrap_or("").to_owned(),
+            file_manager_custom: table.get("file_manager").and_then(toml::Value::as_str).map_or(d.file_manager_custom, |s| s == "custom"),
+            file_manager: table.get("file_manager_command").and_then(toml::Value::as_str).map(str::trim).unwrap_or("").to_owned(),
         }
     }
 
@@ -131,7 +140,9 @@ impl Settings {
             "# omamv settings (Ctrl+, in the window)\n\
              text_size = {}\npage_width = \"{}\"\ntree_side = \"{}\"\ntree_width = {}\nkey_hints = {}\n\
              show_hidden = {}\nrespect_gitignore = {}\nweb_pictures = {}\non_open = \"{}\"\nshow_html = {}\n\
-             # Empty: Omarchy's default editor (omarchy-launch-editor)\neditor = {}\n",
+             # Empty: Omarchy's default editor (omarchy-launch-editor)\neditor = {}\n\
+             # \"omarchy\": the desktop's default for folders; \"custom\": the command below\n\
+             file_manager = \"{}\"\nfile_manager_command = {}\n",
             self.text_size,
             self.width.name(),
             if self.tree_left { "left" } else { "right" },
@@ -143,6 +154,8 @@ impl Settings {
             if self.ask_on_open { "open-by-name" } else { "first-file" },
             self.html,
             toml::Value::String(self.editor.clone()),
+            if self.file_manager_custom { "custom" } else { "omarchy" },
+            toml::Value::String(self.file_manager.clone()),
         )
     }
 }
@@ -198,6 +211,8 @@ mod tests {
             ask_on_open: true,
             html: true,
             editor: "code --wait \"x\"".into(),
+            file_manager_custom: true,
+            file_manager: "thunar \"y\"".into(),
         };
         assert_eq!(Settings::parse(&s.to_toml()), s);
     }

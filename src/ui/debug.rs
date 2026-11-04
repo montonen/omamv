@@ -490,6 +490,46 @@ mod imp {
         crate::settings::set(s);
         press(&w, gdk::Key::e);
         r.check("  an editor that is not there says so", w.status.shown_note().is_some_and(|n| n.contains("no-such-editor-omamv not found")), format!("{:?}", w.status.shown_note()));
+
+        // f: a stand-in file manager the same way; Omarchy's default (GIO) is never started here (ADR-0026).
+        let given_dir = report.with_extension("folder");
+        let mut s = crate::settings::get();
+        s.file_manager_custom = true;
+        s.file_manager = format!("sh -c 'printf %s \"$0\" > {}'", given_dir.display());
+        crate::settings::set(s);
+        press(&w, gdk::Key::f);
+        wait_until(3_000, || given_dir.is_file()).await;
+        let given = std::fs::read_to_string(&given_dir).unwrap_or_default();
+        let note = w.status.shown_note();
+        r.check("f hands the open file's folder to the file manager set", given == root.join("docs").to_string_lossy() && note.as_deref().is_some_and(|n| n.starts_with("opened ") && n.ends_with("/docs in sh")), format!("{given:?} {note:?}"));
+        let _ = std::fs::remove_file(&given_dir);
+        let notes = w.tree.position_of("notes");
+        if let Some(p) = notes {
+            w.tree.click(p);
+        }
+        let in_tree = w.tree.has_focus() && w.tree.cursor_folder() == Some(PathBuf::from("notes"));
+        press(&w, gdk::Key::f);
+        wait_until(3_000, || given_dir.is_file()).await;
+        let given = std::fs::read_to_string(&given_dir).unwrap_or_default();
+        r.check("  in the tree, the folder under the cursor", in_tree && given == root.join("notes").to_string_lossy(), format!("{in_tree} {given:?}"));
+        let on_file = w.tree.position_of("CONTRIBUTING.md").map(|p| {
+            press(&w, gdk::Key::Home);
+            for _ in 0..p {
+                press(&w, gdk::Key::j);
+            }
+            w.tree.cursor_folder()
+        });
+        r.check("  on a file row, that file's folder", on_file == Some(Some(PathBuf::new())), format!("{on_file:?}"));
+        if let Some(p) = notes {
+            w.tree.click(p);
+        }
+        press(&w, gdk::Key::Escape);
+        let _ = std::fs::remove_file(&given_dir);
+        let mut s = crate::settings::get();
+        s.file_manager = "no-such-files-omamv".into();
+        crate::settings::set(s);
+        press(&w, gdk::Key::f);
+        r.check("  a file manager that is not there says so", w.status.shown_note().is_some_and(|n| n.contains("no-such-files-omamv not found")), format!("{:?}", w.status.shown_note()));
         crate::settings::set(crate::settings::Settings::default());
         super::super::apply_settings();
         let report_md = root.join("notes/agent-report.md");

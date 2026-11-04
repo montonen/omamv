@@ -73,20 +73,40 @@ pub fn command(setting: &str) -> Result<Vec<String>, String> {
 /// The editor runs on its own: closing omamv leaves it open.
 pub fn open(setting: &str, file: &Path) -> Result<String, String> {
     let words = command(setting)?;
-    let name = if setting.trim().is_empty() {
-        "Omarchy's editor".to_owned()
-    } else {
-        Path::new(&words[0]).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
-    };
+    let name = if setting.trim().is_empty() { "Omarchy's editor".to_owned() } else { program_name(&words) };
+    spawn(&words, file, &name)?;
+    Ok(name)
+}
+
+/// Open `dir` with a file manager command (ADR-0026); the answer is its
+/// name for the note. Omarchy's default goes through GIO instead.
+pub fn open_folder(setting: &str, dir: &Path) -> Result<String, String> {
+    let mut words = words(setting);
+    if words.is_empty() {
+        return Err("no file manager command set (Ctrl+, sets one)".into());
+    }
+    let Some(p) = find(&words[0]) else { return Err(format!("file manager {} not found (Ctrl+, sets another)", words[0])) };
+    words[0] = p.to_string_lossy().into_owned();
+    let name = program_name(&words);
+    spawn(&words, dir, &name)?;
+    Ok(name)
+}
+
+fn program_name(words: &[String]) -> String {
+    Path::new(&words[0]).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// Start `words` with `arg` added, on its own: its own process group, so it
+/// outlives omamv, and reaped when it ends, so it never lingers as a zombie.
+fn spawn(words: &[String], arg: &Path, name: &str) -> Result<(), String> {
     let mut cmd = Command::new(&words[0]);
-    cmd.args(&words[1..]).arg(file).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.args(&words[1..]).arg(arg).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|e| format!("{name} did not start: {e}"))?;
-    // Reaped when it ends, so it never lingers as a zombie.
     std::thread::spawn(move || {
         let _ = child.wait();
     });
-    Ok(name)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -106,5 +126,12 @@ mod tests {
         assert!(e.contains("no-such-editor-omamv not found"), "{e}");
         let sh = command("sh -c true").unwrap();
         assert!(sh[0].ends_with("/sh") && sh[1..] == ["-c", "true"], "{sh:?}");
+    }
+
+    #[test]
+    fn a_missing_file_manager_says_so() {
+        let why = open_folder("no-such-files-omamv --x", Path::new("/tmp")).unwrap_err();
+        assert!(why.contains("no-such-files-omamv not found"), "{why}");
+        assert!(open_folder("  ", Path::new("/tmp")).unwrap_err().contains("no file manager command"));
     }
 }

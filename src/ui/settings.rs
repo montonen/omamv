@@ -137,6 +137,28 @@ pub fn dialog() -> adw::PreferencesDialog {
         .build();
     editing.add(&editor);
 
+    // f: the desktop's default for folders, or a command (ADR-0026).
+    let manager = combo("File manager", "", &["Omarchy's default", "Custom command"], u32::from(s.file_manager_custom));
+    let manager_command = adw::EntryRow::builder().title("File manager command").text(&s.file_manager).show_apply_button(true).visible(s.file_manager_custom).build();
+    manager.connect_selected_notify({
+        let manager_command = manager_command.clone();
+        move |row| {
+            let custom = row.selected() == 1;
+            manager_command.set_visible(custom);
+            change(|s| s.file_manager_custom = custom);
+        }
+    });
+    manager_command.connect_apply(|row| {
+        let text = row.text().trim().to_owned();
+        change(|s| s.file_manager = text);
+    });
+    let files = adw::PreferencesGroup::builder()
+        .title("File manager")
+        .description("f opens the folder in it: the open file's, or the one under the tree's cursor. Omarchy's default is the app the desktop opens folders with, such as Nautilus. A custom command gets the folder's path added at the end.")
+        .build();
+    files.add(&manager);
+    files.add(&manager_command);
+
     let privacy = adw::PreferencesGroup::builder().title("Privacy").build();
     privacy.add(&web);
 
@@ -145,6 +167,7 @@ pub fn dialog() -> adw::PreferencesDialog {
     page.add(&window);
     page.add(&folder);
     page.add(&editing);
+    page.add(&files);
     page.add(&privacy);
     let dialog = adw::PreferencesDialog::builder().title("Settings").build();
     dialog.add(&page);

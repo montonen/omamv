@@ -356,6 +356,16 @@ impl Tree {
         self.left_out.is_visible().then(|| self.left_out.child().and_downcast::<gtk::Label>().map(|l| l.label().to_string())).flatten()
     }
 
+    /// The folder under the cursor, from the root: the row's own, or the
+    /// folder of the file on it (ADR-0026). Empty is the root.
+    pub fn cursor_folder(&self) -> Option<PathBuf> {
+        let row = self.row(self.cursor.get())?;
+        match node_of(row.upcast_ref())? {
+            Node::Dir(d) => Some(d.rel.clone()),
+            Node::File(f) => Some(f.parent().map(Path::to_path_buf).unwrap_or_default()),
+        }
+    }
+
     /// Where the cursor is.
     #[cfg(debug_assertions)]
     pub fn cursor(&self) -> u32 {
