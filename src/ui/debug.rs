@@ -80,6 +80,11 @@ mod imp {
         }
     }
 
+    /// A stand-in editor or file manager: writes what it was given to `out`, whole. `>` makes the file before `printf` fills it, so it writes beside and moves into place; a check that waits for `out` never reads it half written.
+    fn stand_in(out: &Path) -> String {
+        format!("sh -c 'printf %s \"$0\" > {0}.part && mv {0}.part {0}'", out.display())
+    }
+
     async fn wait_until(limit_ms: u64, mut f: impl FnMut() -> bool) -> bool {
         let t = Instant::now();
         while t.elapsed() < Duration::from_millis(limit_ms) {
@@ -479,7 +484,8 @@ mod imp {
         // e: a stand-in editor that writes down what it was given, outside the folder.
         let handed = report.with_extension("edited");
         let mut s = crate::settings::get();
-        s.editor = format!("sh -c 'printf %s \"$0\" > {}'", handed.display());
+        let _ = std::fs::remove_file(&handed);
+        s.editor = stand_in(&handed);
         crate::settings::set(s);
         press(&w, gdk::Key::e);
         wait_until(3_000, || handed.is_file()).await;
@@ -502,7 +508,8 @@ mod imp {
         let given_dir = report.with_extension("folder");
         let mut s = crate::settings::get();
         s.file_manager_custom = true;
-        s.file_manager = format!("sh -c 'printf %s \"$0\" > {}'", given_dir.display());
+        let _ = std::fs::remove_file(&given_dir);
+        s.file_manager = stand_in(&given_dir);
         crate::settings::set(s);
         press(&w, gdk::Key::f);
         wait_until(3_000, || given_dir.is_file()).await;
