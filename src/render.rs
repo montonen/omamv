@@ -736,6 +736,17 @@ mod tests {
     }
 
     #[test]
+    fn nested_image_wikilinks_render_in_linear_time() {
+        // RUSTSEC-2026-0433: pulldown-cmark before 0.13.6 took quadratic time
+        // on `![[` nested deep and closed; a note could hang the window.
+        // 32,000 deep took seconds there and takes milliseconds now.
+        let src = "![[".repeat(32_000) + &"]]".repeat(32_000);
+        let start = std::time::Instant::now();
+        md(&src);
+        assert!(start.elapsed() < std::time::Duration::from_secs(1), "{:?}", start.elapsed());
+    }
+
+    #[test]
     fn front_matter_is_a_quiet_block_not_a_heading() {
         let html = md("---\ntitle: \"Scan report\"\nrepo: omamv\ntags:\n  - nightly\n  - agents\nnote: <script>x</script>\n---\n\n# Findings\n");
         assert!(html.contains(r#"<dl class="om-meta">"#), "{html}");
